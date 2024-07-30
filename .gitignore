@@ -1,0 +1,5 @@
+
+.hubitat/metadata.json
+aquaLoop copy.groovy
+heatLoop backup.groovy
+ReCirc copy.groovy
