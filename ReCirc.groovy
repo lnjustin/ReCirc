@@ -16,6 +16,10 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
+ * Change Log
+ * -----------
+ * v.0.1.1 - update momentary relay settings and make delay configurable
+ * v.0.1.0 - Beta release
  *
  */
 
@@ -34,6 +38,7 @@ definition(
 @Field String checkMark = "https://raw.githubusercontent.com/lnjustin/App-Images/master/checkMark.svg"
 @Field String xMark = "https://raw.githubusercontent.com/lnjustin/App-Images/master/xMark.svg"
 @Field daysOfWeekList = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+@Field daysOfWeekShortMap = ["Sunday":"SUN", "Monday":"MON", "Tuesday":"TUE", "Wednesday":"WED", "Thursday":"THU", "Friday":"FRI", "Saturday":"SAT"]
 @Field daysOfWeekMap = ["Sunday":1, "Monday":2, "Tuesday":3, "Wednesday":4, "Thursday":5, "Friday":6, "Saturday":7]
 @Field months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"]
 @Field monthsMap = [
@@ -62,9 +67,11 @@ def setupApp() {
 	dynamicPage(name: "setupApp", title: versionLabel, install: true, uninstall: true) {
 
 		section() {
+            header()
             paragraph getInterface("header", " Hot Water Recirculator Physical Control")
             input name: "recircRelay", type: "capability.switch", title: "Physical Relay to toggle the on/off state of the recirculator", multiple: false, required: true
-            if (recircRelay) input name: "recircRelayMomentary", type: "bool", title: "Is the Physical Relay natively a momentary switch? (If not, this app will make it one)", multiple: false, required: true
+            if (recircRelay) input name: "recircRelayMomentary", type: "bool", title: "Make the Physical Relay a momentary switch?", multiple: false, required: true, submitOnChange: true
+            if (recircRelayMomentary) input name: "momentaryDelay", type: "number", title: "Delay before turning off Physical Relay (seconds)", required: true
             input name: "recircSensedState", type: "capability.switch", title: "Switch representing sensed state of the recirculator", multiple: false, required: true
         }
         
@@ -187,12 +194,17 @@ def setupApp() {
         section() {
             paragraph getInterface("header", " Settings")
             input name: "simulationEnable", type: "bool", title: "Simulate Operation with notifications only?", defaultValue: false, submitOnChange: true
-            if (simulationEnable) input name: "simulateNotificationDevices", type: "capability.notification", title: "Notification Device(s)", required: true, multiple: true
+            if (simulationEnable) input name: "simulateNotificationDevices", type: "capability.notification", title: "Simulation Notification Device(s)", required: true, multiple: true
+            input name: "notificationDevices", type: "capability.notification", title: "Notify these devices when turned on or off", required: false, multiple: true
             input name: "logEnable", type: "bool", title: "Enable logging", defaultValue: false, submitOnChange: true
             if (logEnable) {
                 input name: "logTypes", type: "enum", title: "Log Type(s)", multiple: true, options: ["Trace", "Debug", "Error", "Warning"], submitOnChange: true
                 input name: "logTimed", type: "bool", title: "Disable debug logging in 30 minutes?", defaultValue: false, submitOnChange: true
             }
+        }
+
+        section() {
+            footer()
         }
 	}
 }
@@ -201,19 +213,14 @@ def setupApp() {
 def schedulePage() {
 	dynamicPage(name: "schedulePage") {
         section() {
-            if (state.refreshTable == true) {
-                state.refreshTable = false
-                paragraph "<script>{changeSubmit(this)}</script>"
-            }
-
+            header()
             paragraph getInterface("header", " Program Schedules")
             paragraph getInterface("note", "") 
             if (state.scheduleMap) {
+                logDebug("ScheduleMap: ${state.scheduleMap}", "Debug")
                 for (j in state.scheduleMap.keySet()) {
-                    paragraph getInterface("subHeader", settings["schedule${j}Name"] ?: " New Schedule") + "<script src='https://code.iconify.design/iconify-icon/1.0.0/iconify-icon.min.js'></script>"
-                    input name: "schedule${j}Name", type: "text", title: "Schedule Name", required: true, width: 9, submitOnChange: true
-                    paragraph buttonLink("deleteSchedule${j}", "<iconify-icon icon='fluent:delete-24-filled'  style='color: #ff2600; display:inline-block; vertical-align: middle;'></iconify-icon><b><font size=4> Delete Schedule</font></b>","red", 35), width: 3
-                    
+                    paragraph getInterface("subHeaderWithRightLink", (settings["schedule${j}Name"] ?: " New Schedule"), buttonLink("deleteSchedule${j}", "<div style='float:right;vertical-align: middle; margin: 4px; transform: translateY(-30%); top: 50%;'><b><font size=3>Delete</font></b></div><iconify-icon icon='material-symbols:delete-outline'  style='color: #ff2600; top: 50%; transform: translateY(5%); display:inline-block; float:right; vertical-align: middle;'></iconify-icon>","red", 20)) + "<script src='https://code.iconify.design/iconify-icon/1.0.0/iconify-icon.min.js'></script>"
+                    input name: "schedule${j}Name", type: "text", title: "Schedule Name", required: true, width: 12, submitOnChange: true                    
 
                     input(name:"schedule${j}StartMonth", type:"enum", options:months, title: "Start Month", required: true, width: 2)
                     input(name:"schedule${j}StartDay", type:"enum", options:getNumDaysInMonth(settings["schedule{j}StartMonth"]), title: "Start Day", required: true, width: 2)                            
@@ -221,38 +228,41 @@ def schedulePage() {
                     input(name:"schedule${j}StopDay", type:"enum", options:getNumDaysInMonth(settings["schedule{j}StopMonth"]), title: "Stop Day", required: true, width: 2)
                     input name:"schedule${j}DaysOfWeek", type: "enum", title: "Schedule Days of Week", options: daysOfWeekList, multiple: true, required: true, width: 4
                     
-                    /*
-                    paragraph buttonLink("addPeriod${j}", "<iconify-icon icon='zondicons:add-solid'  style='display:inline-block; color: green; vertical-align: middle;'></iconify-icon><b><font size=4> Add Time Period</font></b>","green", 35), width: 12
-
-                    for (k in state.scheduleMap[j]) {
-                        input name: "schedule${j}Period${k}Start", type: "time", title: "Start", required: true, width: 2
-                        input name: "schedule${j}Period${k}End", type: "time", title: "End", required: true, width: 2
-                        input name: "schedule${j}Period${k}State", type:"enum", options:["On", "Off"], title: "State", description: " ", required: true, width: 1
-                        paragraph buttonLink("deletePeriod${j}-${k}", "<iconify-icon icon='fluent:delete-24-filled'  style='display:inline-block; color: red; vertical-align: middle;'></iconify-icon>","red", 30), width: 1
-                    }
-                    */
                     displayPeriodTable(j)
                     
-                    if (state.addingPeriod != null) {
-                        input name: "periodStart", type: "time", title: "Start", required: true, width: 3
-                        input name: "periodEnd", type: "time", title: "End", required: true, width: 3
-                        input name: "confirmPeriodToAdd", type: "button", title: "Add", width: 1
-                        input name: "cancelPeriodToAdd", type: "button", title: "Cancel", width: 1
+                    if (state.addingPeriod == j) {
+                        def midnight = (new Date().clearTime())
+                        input name: "addPeriodStart", type: "time", title: "Start", required: true, width: 2, submitOnChange: true
+                        if (state.initializeAddPeriod) app.updateSetting("addPeriodStart",[type:"time",value: midnight]) 
+                        input name: "addPeriodEnd", type: "time", title: "End", required: true, width: 2, submitOnChange: true
+                        if (state.initializeAddPeriod) app.updateSetting("addPeriodEnd",[type:"time",value: midnight]) 
+                        input name: "confirmPeriodToAdd", type: "button", title: "Add", width: 2
+                        input name: "cancelPeriodToAdd", type: "button", title: "Cancel", width: 2
+                        state.initializeAddPeriod = false
                     }
                     else if (state.editingPeriod != null) {
                         def sched = state.editingPeriod?.schedule
                         def per = state.editingPeriod?.period
-                        def periodMap = state.scheduleMap[sched][per]
-                        input name: "periodStart", type: "time", title: "Start", required: true, width: 3, defaultValue: (periodMap?.start != null ? periodMap?.start :  "")
-                        input name: "periodEnd", type: "time", title: "End", required: true, width: 3, defaultValue: (periodMap?.end != null ? periodMap?.end :  "")
-                        input name: "confirmPeriodToEdit", type: "button", title: "Save", width: 1
-                        input name: "cancelPeriodToEdit", type: "button", title: "Cancel", width: 1                       
+                        if (sched == j) {
+                            def periodMap = state.scheduleMap[sched][per]
+                            input name: "editPeriodStart", type: "time", title: "Start", required: true, width: 2, submitOnChange: true
+                            if (state.initializeEditing && periodMap.start) app.updateSetting("editPeriodStart",[type:"time",value: periodMap.start]) 
+                            input name: "editPeriodEnd", type: "time", title: "End", required: true, width: 2, submitOnChange: true
+                            if (state.initializeEditing && periodMap.end) app.updateSetting("editPeriodEnd",[type:"time",value: periodMap.end]) 
+                            input name: "confirmPeriodToEdit", type: "button", title: "Save", width: 2
+                            input name: "cancelPeriodToEdit", type: "button", title: "Cancel", width: 2    
+                            state.initializeEditing = false     
+                        }              
                     }
                     
                 }
             }
             paragraph getInterface("line")
             input name: "addSchedule", type: "button", title: "Add Schedule", width: 3  
+        }
+
+        section() {
+            footer()
         }
     }
 }   
@@ -279,26 +289,44 @@ String displayPeriodTable(scheduleId) {
 
 	state.scheduleMap[(scheduleId)].eachWithIndex { item, index ->
         str += "<tr style='border-bottom:2px solid black'>"
-        str += '<td>' + buttonLink("editPeriod:$scheduleId:$index", toDateTime(item.start).format("hh:mm a"), "#1A77C9") + '</td>'
-        str += '<td>' + buttonLink("editPeriod:$scheduleId:$index", toDateTime(item.end).format("hh:mm a"), "#1A77C9") + '</td>'
-        str += '<td>' + buttonLink("toggleOnOff:$scheduleId:$index", (item.state && item.state == "on" ? onIcon : offIcon), "#1A77C9") + '</td>'
+        str += '<td>' + buttonLink("editPeriod:$scheduleId:$index", item && item.start ? toDateTime(item.start).format("hh:mm a") : "Set Start", "#1A77C9") + '</td>'
+        str += '<td>' + buttonLink("editPeriod:$scheduleId:$index", item && item.end ? toDateTime(item.end).format("hh:mm a") : "Set End", "#1A77C9") + '</td>'
+        str += '<td>' + buttonLink("toggleOnOff:$scheduleId:$index", (item?.state && item?.state == "on" ? onIcon : offIcon), "#1A77C9") + '</td>'
         str += '<td>' + buttonLink("editPeriod:$scheduleId:$index", editIcon, "#1A77C9") + '</td>'
         str += '<td>' + buttonLink("deletePeriod:$scheduleId:$index", deleteIcon, "#1A77C9") + '</td>'
         str += "</tr>"
 	}
-	str += "</tr></table></div>"
-    str += buttonLink("addPeriod${scheduleId}", "<iconify-icon icon='zondicons:add-solid'  style='display:inline-block; color: green; vertical-align: middle;'></iconify-icon><b><font size=3> Add Time Period</font></b>","green", 20)
-	paragraph str
-}
+	str += "</tr>"
 
-/*
-String buttonLink(String btnName, String linkText, color = "#1A77C9", font = "15px") {
-	"<div class='form-group'><input type='hidden' name='${btnName}.type' value='button'></div><div><div class='submitOnChange' onclick='buttonClick(this)' style='color:$color;cursor:pointer;font-size:$font'>$linkText</div></div><input type='hidden' name='settings[$btnName]' value=''>"
+    str += "</table><table class='mdl-data-table tstat-col' style=';border:none'>"
+    str += "<tr>"
+    str += "<td style='border-left:2px solid black; border-right:2px solid black; border-bottom:2px solid black; border-top:none'>"
+    str += buttonLink("addPeriod${scheduleId}", "<iconify-icon icon='zondicons:add-solid'  style='display:inline-block; color: green; vertical-align: middle;'></iconify-icon>","green", 20)
+	str += '</td>'
+    str += '<td style="border:none; text-align:middle; vertical-align:middle">' + buttonLink("addPeriod${scheduleId}", '<iconify-icon icon="fluent:arrow-left-12-filled" width="25" height="25"  style="color: green; transform: translateY(25%);"></iconify-icon><b><font color=green size=3> Add Time Period</font></b>', 20) + '</td>'
+    str += "</tr>"
+    str += "</table></div>"
+    paragraph str
 }
-*/
 
 String buttonLink(String btnName, String linkText, color = "#1A77C9", font = 15) {
-	"<div style='vertical-align: middle;' class='form-group'><input type='hidden' name='${btnName}.type' value='button'></div><div style='vertical-align:middle'><div class='submitOnChange' onclick='buttonClick(this)' style='display:inline-block;vertical-align: middle;color:$color;cursor:pointer;font-size:${font}px'>$linkText</div></div style='vertical-align: middle;'><input type='hidden' name='settings[$btnName]' value=''>"
+	"<div style='display:inline-block;vertical-align: middle;' class='form-group'><input type='hidden' name='${btnName}.type' value='button'></div><div style='display:inline-block;vertical-align:middle'><div class='submitOnChange' onclick='buttonClick(this)' style='display:inline-block;vertical-align: middle;color:$color;cursor:pointer;font-size:${font}px'>$linkText</div></div style='display:inline-block;vertical-align: middle;'><input type='hidden' name='settings[$btnName]' value=''>"
+}
+
+String logo(String width='75') {
+    return '<img width="' + width + 'px" style="display: block;margin-left: auto;margin-right: auto;margin-top:0px;" border="0" src="' + getLogoPath() + '">'
+}
+
+def header() {
+    paragraph logo('100')
+}
+
+def getLogoPath() {
+    return "https://github.com/lnjustin/App-Images/blob/master/ReCirc/reCirc.png?raw=true"
+}
+
+def footer() {
+    paragraph getInterface("line", "") + '<div style="display: block;margin-left: auto;margin-right: auto;text-align:center"><img width="25px" border="0" src="' + getLogoPath() + '"> &copy; 2024 lnjustin.<br>'
 }
 
 void appButtonHandler(btn) {
@@ -308,6 +336,7 @@ void appButtonHandler(btn) {
             break
         case "cancelPeriodToAdd":
             state.addingPeriod = null
+            state.editingPeriod = null
             break
     }
     if (btn.contains("deleteSchedule")) {
@@ -316,25 +345,32 @@ void appButtonHandler(btn) {
     else if (btn.contains("addPeriod")) {
         //   addPeriodIndex(btn.minus("addPeriod"))
         state.addingPeriod = btn.minus("addPeriod") // set addingPeriod state variable to index of schedule to which adding period
+        state.initializeAddPeriod = true
     }
     else if (btn.contains("confirmPeriodToAdd")) {
         confirmAddPeriod()
     }
     else if (btn.contains("cancelPeriodToAdd")) {
         state.addingPeriod = null
+        state.editingPeriod = null
+        state.initializeAddPeriod = false
+    }
+    else if (btn.contains("confirmPeriodToEdit")) {
+        confirmEditPeriod()
+    }  
+    else if (btn.contains("cancelPeriodToEdit")) {
+        state.editingPeriod = null
+        state.addingPeriod = null
+        state.initializeEditing = false
     }
     else if (btn.contains("editPeriod")) {
         List indices = btn.tokenize(":")
         def sched = indices[1]
         def per = indices[2] as Integer
         state.editingPeriod = [schedule: sched, period: per]
-    }
-    else if (btn.contains("confirmPeriodToEdit")) {
-        confirmEditPeriod()
-    }   
-    else if (btn.contains("cancelPeriodToEdit")) {
-        state.editingPeriod = null
-    }
+        state.initializeEditing = true
+        state.addingPeriod = null
+    } 
     else if (btn.contains("toggleOnOff")) {
         List indices = btn.tokenize(":")
         def sched = indices[1]
@@ -363,44 +399,33 @@ def deleteScheduleIndex(indexToDelete) {
 
 def confirmAddPeriod() {
     def periodMap = [:]
-    periodMap.start = settings["periodStart"]
-    periodMap.end = settings["periodEnd"]
+    periodMap.start = settings["addPeriodStart"]
+    periodMap.end = settings["addPeriodEnd"]
     periodMap.state = "on"
     state.scheduleMap[(state.addingPeriod)].add(periodMap)    
     state.addingPeriod = null
+    state.editingPeriod = null
+    state.initializeAddPeriod = false
 }
 
 def cancelAddPeriod() {
     state.addingPeriod = null
+    state.editingPeriod = null
+    state.initializeAddPeriod = false
 }
 
 def confirmEditPeriod() {
-    logDebug("confirm", "Debug")
     def periodMap = [:]
-    periodMap.start = settings["periodStart"]
-    periodMap.end = settings["periodEnd"]
-    state.scheduleMap[(state.editingPeriod.schedule)][state.editingPeriod.period].start = periodMap.start
-    state.scheduleMap[(state.editingPeriod.schedule)][state.editingPeriod.period].end = periodMap.end
+    periodMap.start = settings["editPeriodStart"]
+    periodMap.end = settings["editPeriodEnd"]
+    periodMap.state = state.scheduleMap[(state.editingPeriod.schedule)][(state.editingPeriod.period)].state
+    state.scheduleMap[(state.editingPeriod.schedule)][(state.editingPeriod.period)] = periodMap
+    logDebug("periodStart = ${settings["editPeriodStart"]} periodEnd = ${settings["editPeriodEnd"]} edited ScheduleMap = ${state.scheduleMap}", "Debug")
     state.editingPeriod = null
-    state.refreshTable = true
+    state.addingPeriod = null
+    state.initializeEditing = null
 }
 
-/*
-def addPeriodIndex(scheduleIndex) {
-    if (!state.nextPeriodIndex) state.nextPeriodIndex = [:]
-    if (state.nextPeriodIndex[scheduleIndex] == null) state.nextPeriodIndex[scheduleIndex] = -1
-    state.nextPeriodIndex[scheduleIndex]++
-    if (state.scheduleMap[scheduleIndex] != null) state.scheduleMap[scheduleIndex].add(state.nextPeriodIndex[scheduleIndex])    
-}
-
-
-def deletePeriodIndex(scheduleAndPeriod) {
-    def parsed = scheduleAndPeriod.split("-")
-    def scheduleIndex = parsed[0]
-    def periodIndex = parsed[1] as Integer
-    if (state.scheduleMap[scheduleIndex] != null) state.scheduleMap[scheduleIndex].removeElement(periodIndex) 
-}
-*/
 def getNumDaysInMonth(month) {
     def days = days31
     if (month && month == "FEB") days = days29
@@ -515,21 +540,28 @@ def disableDebugLogging() {
 
 def scheduleSchedules() {
     for (j in state.scheduleMap.keySet()) {
+        
         def daysOfWeek = settings["schedule${j}DaysOfWeek"]
+        for (i=0; i<daysOfWeek.size(); i++) {
+            daysOfWeek[i] = daysOfWeekShortMap[daysOfWeek[i]]
+        }
         def daysOfWeekChron = daysOfWeek.join(",")
+        logDebug("Scheduling schedule ${settings["schedule${j}Name"]} for ${settings["schedule${j}DaysOfWeek"]}", "Debug")
         // schedule update for beginning and end of each time window, on selected days of the week, but irrespective of dates. When triggered, will check if current day is within the date window at that time and ignore if not
-        for (k in state.scheduleMap[j]) {
-            def start = toDateTime(settings["schedule${j}Period${k}Start"])
-            def startHour = start.format("HH")
-            def startMin = start.format("mm")
+        state.scheduleMap[(j)].eachWithIndex { item, index ->
+            def start = toDateTime(item?.start)
+            def startHour = start.format("H")
+            def startMin = start.format("m")
             def startChron = "0 ${startMin} ${startHour} ? * ${daysOfWeekChron}"
-            schedule(startChron, handlePeriodStart, [data: [scheduleId: j, periodId: k]])
+            schedule(startChron, handlePeriodStart, [data: [scheduleId: j, periodId: index], overwrite: false])
+            logDebug("Scheduled start of period ${index} with chron string ${startChron}", "Debug")
 
-            def end = toDateTime(settings["schedule${j}Period${k}End"])
-            def endHour = end.format("HH")
-            def endMin = end.format("mm")
+            def end = toDateTime(item?.end)
+            def endHour = end.format("H")
+            def endMin = end.format("m")
             def endChron = "0 ${endMin} ${endHour} ? * ${daysOfWeekChron}"
-            schedule(endChron, handlePeriodStop, [data: [scheduleId: j, periodId: k]])
+            schedule(endChron, handlePeriodStop, [data: [scheduleId: j, periodId: index], overwrite: false])
+            logDebug("Scheduled end of period ${index} with chron string ${endChron}", "Debug")
         }
     }
 }
@@ -542,7 +574,8 @@ def turnRecirculatorOn() {
         }
         else {
             recircRelay.on()
-            if (!recircRelayMomentary) runIn(1, makeRelayMomentary)
+            if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+            notificationDevices?.deviceNotification("Recirculator On")
         }
         state.lastOnStart = (new Date()).getTime() 
     }
@@ -556,7 +589,8 @@ def turnRecirculatorOff() {
         }
         else {
             recircRelay.on()
-            if (!recircRelayMomentary) runIn(1, makeRelayMomentary)
+            if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+            notificationDevices?.deviceNotification("Recirculator Off")
         }
         unschedule("delayedOffHandler")
         logDebug("Turned off recirculator and canceled any pending delayed turning off of the recirculator.", "Debug")
@@ -658,13 +692,13 @@ Boolean doesModeAllowRecirculatorOff() {
 // SCHEDULES
 def handlePeriodStart(data) {
     def scheduleId = data.scheduleId
-    def periodId = data.periodId
+    def periodId = data.periodId as Integer
 
     if (!isTodayWithinScheduleDates(scheduleId)) return // schedule not applicable to today's date
     if (!isScheduledDayofWeek(scheduleId)) return // schedule not applicable to today's day of the week
 
     // scheduled period start is applicable for today, so handle accordingly
-    if (settings["schedule${scheduleId}Period${periodId}State"] == "On") {
+    if (state.scheduleMap[(scheduleId)] && state.scheduleMap[(scheduleId)][periodId] && state.scheduleMap[(scheduleId)][periodId].state == "on") {
         // turn recirculator on unless Hubitat mode dictates that the recirculator be off, no matter dynamic triggers (prioritizes time schedule over dynamic triggers)
         if (recircSensedState.currentSwitch != "on") {
             if (doesModeAllowRecirculatorOn()) turnRecirculatorOn()
@@ -672,7 +706,7 @@ def handlePeriodStart(data) {
         }
         else logDebug("Recirculator is scheduled to turn on now, but recirculator is already on. Nothing to do.", "Debug")
     }
-    else if (settings["schedule${scheduleId}Period${periodId}State"] == "Off") {
+    else if (state.scheduleMap[(scheduleId)] && state.scheduleMap[(scheduleId)][periodId] && state.scheduleMap[(scheduleId)][periodId].state == "off") {
         // turn recirculator off unless Hubitat mode dictates that the recirculator be on, no matter dynamic triggers (prioritizes time schedule over dynamic triggers)
         if (recircSensedState.currentSwitch != "off") {
             if (doesModeAllowRecirculatorOff()) turnRecirculatorOff()
@@ -685,7 +719,7 @@ def handlePeriodStart(data) {
 
 def handlePeriodStop(data) {
     def scheduleId = data.scheduleId
-    def periodId = data.periodId
+    def periodId = data.periodId as Integer
 
     if (!isTodayWithinScheduleDates(scheduleId)) return // schedule not applicable to today's date
     if (!isScheduledDayofWeek(scheduleId)) return // schedule not applicable to today's day of the week
@@ -696,8 +730,8 @@ def handlePeriodStop(data) {
 
 def isTimeOfDayWithinPeriod(scheduleId, periodId) {
     def answer = false
-    def start = toDateTime(settings["schedule${scheduleId}Period${periodId}Start"])
-    def end = toDateTime(settings["schedule${scheduleId}Period${periodId}End"])
+    def start = toDateTime(state.scheduleMap[(scheduleId)][periodId].start)
+    def end = toDateTime(state.scheduleMap[(scheduleId)][periodId].end)
     if (start && end && timeOfDayIsBetween(start, end, new Date(), location.timeZone)) answer = true
     return answer
 }
@@ -711,10 +745,10 @@ Boolean doSchedulesAllowRecirculatorState(onOrOffState) {
         for (j in state.scheduleMap.keySet()) {
             if (isTodayWithinScheduleDates(j) && isScheduledDayofWeek(k)) {
                 // schedule applicable to today
-                for (k in state.scheduleMap[j]) {
+                state.scheduleMap[(j)].eachWithIndex { item, index ->
                     // check if time periods of schedule allow for recirculator to be on right now
-                    if (isTimeOfDayWithinPeriod(j, k)) {
-                        if (settings["schedule${j}Period${k}State"] == compareState) answer = false
+                    if (isTimeOfDayWithinPeriod(j, index)) {
+                        if (state.scheduleMap[(j)][index].state == compareState) answer = false
                     }
                 }
             }
@@ -988,6 +1022,9 @@ def getInterface(type, txt="", link="") {
             break     
         case "subHeader": 
             return "<div style='color:#000000;font-weight: bold;background-color:#ededed;border: 1px solid;box-shadow: 2px 3px #A9A9A9'> ${txt}</div>"
+            break
+        case "subHeaderWithRightLink": 
+            return "<div style='align-items:center; top: 50%; color:#000000;font-weight: bold;background-color:#ededed;border: 1px solid;box-shadow: 2px 3px #A9A9A9'><div style='display:inline-block;'> ${txt}</div><div style='float:right; display:inline-block;  text-align:center; top: 50%; vertical-align:middle'>${link}</div></div>"
             break
         case "subSection1Start": 
             return "<div style='color:#000000;background-color:#d4d4d4;border: 0px solid'>"
