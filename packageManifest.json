@@ -1,0 +1,18 @@
+{
+  "packageName": "ReCirc",
+  "author": "lnustin",
+  "version": "0.1.0",
+  "minimumHEVersion": "2.1.9",
+  "dateReleased": "2024-07-30",
+  "apps": [
+    {
+      "id": "a4ad6390-fd2f-401d-b709-817627806e56",
+      "name": "ReCirc",
+      "namespace": "lnjustin",
+      "location": "https://github.com/lnjustin/ReCirc/raw/main/ReCirc.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": false
+    }
+  ]
+}
