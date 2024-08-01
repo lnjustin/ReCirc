@@ -18,6 +18,8 @@
  *
  * Change Log
  * -----------
+ * v.0.2.0 - bug fixes with modes and schedules; optimized to unsubscribe from trigger events if mode or schedule active; added support for schedules that wrap around to new year
+ * v.0.1.2 - bug fix with schedules
  * v.0.1.1 - update momentary relay settings and make delay configurable
  * v.0.1.0 - Beta release
  *
@@ -80,7 +82,7 @@ def setupApp() {
 			input name: "manualOnSwitch", type: "capability.switch", title: "ON Switch: Momentary Switch to manually turn on the recirculator", multiple: false, required: false
             paragraph getInterface("note", "Demanding the recirculator to turn on using this switch will turn the recirculator on even if the Hubitat hub is in a mode in which the recirculator is to be off and even if the recirculator is currently scheduled to be off.")
             input name: "manualOnDuration", type: "number", title: "On Duration (minutes)", required: false, defaultValue: 20, multiple: false, width: 6
-            input name: "manualOnCoolDownPeriod", type: "number", title: "Minimum minutes, if any, between manual on periods?", required: false, defaultValue: 0, multiple: false, width: 6
+            input name: "manualOnCoolDownPeriod", type: "number", title: "Minimum off duration, if any, before can manually turn on", required: false, defaultValue: 0, multiple: false, width: 6
             
             input name: "manualOffSwitch", type: "capability.switch", title: "OFF Switch: Momentary Switch to manually turn off the recirculator", multiple: false, required: false
             paragraph getInterface("note", "Demanding the recirculator to turn off using this switch will turn the recirculator off even if the Hubitat hub is in a mode in which the recirculator is to be on, even if the recirculator is currently scheduled to be on, and even if dynamic triggers would otherwise trigger the recirculator to be on.")
@@ -172,24 +174,30 @@ def setupApp() {
                 if (turnOffWhenFlowStops) input name: "turnOffWhenFlowStopsDelay", type: "number", title: "How long of a delay, if any, until turning off recirculator after flow stops(minutes)?", required: true, defaultValue: 0, multiple: false
 			}
 
-/*
-            paragraph ""
-            input name: "waterTemperatureSensor", type: "capability.temperatureMeasurement", title: "On when this water temperature sensor is below threshold?", multiple: false, required: false
-            if (waterTemperatureSensor) {
-                input name: "thresholdWaterTemperature", type: "number", title: "Temperature Threshold", defaultValue: 105, required: true
-                input name: "offWhenTempAtTarget", type: "bool", title: "Off at target temp?", defaultValue: true
-                if (offWhenTempAtTarget) {
-                    input name: "targetWaterTemperature", type: "number", title: "Temperature Target", defaultValue: 120, required: true
-                    input name: "offONLYWhenTempAtTarget", type: "bool", title: "Override Max On-Time Duration to Keep On Until Hit Target?", defaultValue: true
-                }
-            }
-            */
             paragraph getInterface("subHeader", " Dynamic Trigger Settings")
             input name: "triggerOnMaxDuration", type: "number", title: "Maximum Duration of triggered on period (minutes)?", required: false, defaultValue: 30, multiple: false, width: 4
             input name: "maxDurationExtendable", type: "bool", title: "Maximum Duration Extendable with Continued Triggers?", defaultValue: false, required: true, width: 4
             input name: "triggerOnCoolDownPeriod", type: "number", title: "Minimum Duration between end of one triggered on period and start of next triggered on period (minutes)?", required: false, defaultValue: 0, multiple: false, width: 4
     
 		}
+
+        section() {
+            
+            paragraph getInterface("header", " Water Temperature Control (still in beta development - not yet implemented)")
+            paragraph getInterface("note", " Some recirculation systems automatically turn on/off as needed to maintain water temperature between temperature setpoints. If your recriculation system does not do this automatically, you can use the controls below to do it via Hubitat.")
+            input name: "waterTempControlType", type: "enum", options: ["singleValue" : "Value of single temp sensor", "differenceValue" : "Temp Sensor 2 - Temp Sensor 1"], title: "Control Based On...", required: false
+            if (waterTempControlType == "singleValue") {
+                input name: "waterTempSensor1", type: "capability.temperatureMeasurement", title: (waterTempControlType == "singleValue") ? "Water Temperature Sensor" : "Water Temperature Sensor 1", multiple: false, required: false
+                input name: "turnOffTemp", type: "number", title: "Turn Off When Temp Reaches", defaultValue: 120, required: true
+                input name: "turnOnTemp", type: "number", title: "Turn On When Temp Falls To", defaultValue: 100, required: true
+            }
+            else if (waterTempControlType == "differenceValue") {
+                input name: "waterTempSensor1", type: "capability.temperatureMeasurement", title: (waterTempControlType == "singleValue") ? "Water Temperature Sensor" : "Water Temperature Sensor 1", multiple: false, required: false
+                input name: "waterTempSensor2", type: "capability.temperatureMeasurement", title: "Water Temperature Sensor 2", multiple: false, required: true
+                input name: "turnOnDiffTemp", type: "number", title: "Turn On When Temp Difference Reaches", defaultValue: 20, required: true
+                input name: "turnOffDiffTemp", type: "number", title: "Turn Off When Temp Difference Falls To", defaultValue: 0, required: true
+            }
+        }
 
         section() {
             paragraph getInterface("header", " Settings")
@@ -217,7 +225,6 @@ def schedulePage() {
             paragraph getInterface("header", " Program Schedules")
             paragraph getInterface("note", "") 
             if (state.scheduleMap) {
-                logDebug("ScheduleMap: ${state.scheduleMap}", "Debug")
                 for (j in state.scheduleMap.keySet()) {
                     paragraph getInterface("subHeaderWithRightLink", (settings["schedule${j}Name"] ?: " New Schedule"), buttonLink("deleteSchedule${j}", "<div style='float:right;vertical-align: middle; margin: 4px; transform: translateY(-30%); top: 50%;'><b><font size=3>Delete</font></b></div><iconify-icon icon='material-symbols:delete-outline'  style='color: #ff2600; top: 50%; transform: translateY(5%); display:inline-block; float:right; vertical-align: middle;'></iconify-icon>","red", 20)) + "<script src='https://code.iconify.design/iconify-icon/1.0.0/iconify-icon.min.js'></script>"
                     input name: "schedule${j}Name", type: "text", title: "Schedule Name", required: true, width: 12, submitOnChange: true                    
@@ -420,7 +427,6 @@ def confirmEditPeriod() {
     periodMap.end = settings["editPeriodEnd"]
     periodMap.state = state.scheduleMap[(state.editingPeriod.schedule)][(state.editingPeriod.period)].state
     state.scheduleMap[(state.editingPeriod.schedule)][(state.editingPeriod.period)] = periodMap
-    logDebug("periodStart = ${settings["editPeriodStart"]} periodEnd = ${settings["editPeriodEnd"]} edited ScheduleMap = ${state.scheduleMap}", "Debug")
     state.editingPeriod = null
     state.addingPeriod = null
     state.initializeEditing = null
@@ -473,12 +479,31 @@ def initialize() {
     if (manualOnSwitch) subscribe(manualOnSwitch, "switch.on", manualOnHandler)
     if (manualOffSwitch) subscribe(manualOffSwitch, "switch.on", manualOffHandler)
     
-	if (offModes) subscribe(location, locationModeHandler)
+	if (offModes || onModes) subscribe(location, "mode", locationModeHandler)
 
     if (state.scheduleMap) scheduleSchedules()
 
-    if (waterTemperatureSensor) subscribe(waterTemperatureSensor, "temperature", waterTempHandler)
+    initializeRecirculatorState()
 
+    updateTriggerSubscriptionsAndDelayedEvents()
+
+    updateWaterTempSensorSubscriptions()
+
+    initializeDebugLogging()
+}
+
+def initializeDebugLogging() {
+    if (logEnable && logTimed) runIn(1800, disableDebugLogging)
+}
+
+def disableDebugLogging() {
+    logDebug("Disabling Debug Logging", "Trace")
+    app.updateSetting("logEnable",[value:"false",type:"bool"])
+    app.updateSetting("logTimed",[value:"false",type:"bool"])
+}
+
+def subscribeDynamicTriggers() {
+    logDebug("Subscribing to dynamic trigger events.", "Debug")
     if (motionSensors) {
         subscribe(motionSensors, "motion.active", handleTriggerOnEvent)
         if (turnOffWhenMotionStops) subscribe(motionSensors, "motion.inactive", handleMotionOff)
@@ -522,30 +547,102 @@ def initialize() {
         subscribe(flumeDevice, "flowStatus.running", handleTriggerOnEvent)
         if (turnOffWhenFlowStops) subscribe(flumeDevice, "flowStatus.stopped", handleFlumeOff)
     }
-
-    state.simulatedRecirculatorState = "off"
-	
-    initializeDebugLogging()
 }
 
-def initializeDebugLogging() {
-    if (logEnable && logTimed) runIn(1800, disableDebugLogging)
+def unsubscribeDynamicTriggers() {
+    logDebug("Unsubscribing from dynamic trigger events.", "Debug")
+     if (motionSensors) {
+        unsubscribe(motionSensors, "motion.active")
+        if (turnOffWhenMotionStops) unsubscribe(motionSensors, "motion.inactive")
+    }
+
+    if (arrivePresenceSensors) {
+        unsubscribe(arrivePresenceSensors, "presence.present")
+        if (turnOffWhenAllNotPresent) unsubscribe(arrivePresenceSensors, "presence.notPresent")
+    }
+
+    if (departPresenceSensors) {
+        unsubscribe(departPresenceSensors, "presence.notPresent")
+        if (turnOffWhenAllPresent) unsubscribe(departPresenceSensors, "presence.present")
+    }
+
+    if (openContactSensors) {
+        unsubscribe(openContactSensors, "contact.open")
+        if (turnOffWhenReclose) unsubscribe(openContactSensors, "contact.closed")
+    }
+
+    if (closeContactSensors) {
+        unsubscribe(closeContactSensors, "contact.closed")
+        if (turnOffWhenReopen) unsubscribe(closeContactSensors, "contact.open")
+    }
+
+    if (onSwitches) {
+        unsubscribe(onSwitches, "switch.on")
+        if (turnOffWithSwitches) unsubscribe(onSwitches, "switch.off")
+    }
+
+    if (tempTriggerSensors) {
+        unsubscribe(tempTriggerSensors, "temperature")
+    }
+
+    if (accelerationSensors) {
+        unsubscribe(accelerationSensors, "acceleration.active")
+        if (turnOffWhenStopsMoving) unsubscribe(accelerationSensors, "acceleration.inactive")
+    }
+
+    if (flumeDevice) {
+        unsubscribe(flumeDevice, "flowStatus.running")
+        if (turnOffWhenFlowStops) unsubscribe(flumeDevice, "flowStatus.stopped")
+    }   
 }
 
-def disableDebugLogging() {
-    logDebug("Disabling Debug Logging", "Trace")
-    app.updateSetting("logEnable",[value:"false",type:"bool"])
-    app.updateSetting("logTimed",[value:"false",type:"bool"])
+def setRecirculatorOnOffOnInitialize() {
+    if (inAnySpecifiedMode()) updateFromMode()
+    else if (inAnyScheduledTimePeriod()) updateFromScheduledTimePeriod()
+    else updateFromTriggerState()
+}
+
+def updateTriggerSubscriptionsAndDelayedEvents() {
+    if (!inAnySpecifiedMode() && !inAnyScheduledTimePeriod()) subscribeDynamicTriggers()
+    else {
+        unsubscribeDynamicTriggers()
+        cancelDelayedTriggerEvents()
+    }
+}
+
+def cancelDelayedTriggerEvents() {
+    unschedule("delayedOffHandler")
+    unschedule("updateFromTriggerState")
+    unschedule("handleTriggerOnMaxDurationReached")
+}
+
+def subscribeWaterTempSensors() {
+    logDebug("Subscribing to any water temperature sensor events.", "Debug")
+    if (waterTempControlType != null) {
+        if (waterTempSensor1) subscribe(waterTempSensor1, "temperature", waterTempHandler)
+        if (waterTempSensor2) subscribe(waterTempSensor2, "temperature", waterTempHandler)
+    }
+}
+
+def unsubscribeWaterTempSensors() {
+    logDebug("Unsubscribing from any water temperature sensor events.", "Debug")
+    unsubscribe(waterTempSensor1, "temperature")
+    unsubscribe(waterTempSensor2, "temperature")
+}
+
+def updateWaterTempSensorSubscriptions() {
+    if (isRecirculatorStateOn()) subscribeWaterTempSensors()
+    else unsubscribeWaterTempSensors()
 }
 
 def scheduleSchedules() {
     for (j in state.scheduleMap.keySet()) {
         
-        def daysOfWeek = settings["schedule${j}DaysOfWeek"]
-        for (i=0; i<daysOfWeek.size(); i++) {
-            daysOfWeek[i] = daysOfWeekShortMap[daysOfWeek[i]]
+        def shortDays = settings["schedule${j}DaysOfWeek"]
+        for (i=0; i<shortDays.size(); i++) {
+            shortDays[i] = daysOfWeekShortMap[shortDays[i]]
         }
-        def daysOfWeekChron = daysOfWeek.join(",")
+        def daysOfWeekChron = shortDays.join(",")
         logDebug("Scheduling schedule ${settings["schedule${j}Name"]} for ${settings["schedule${j}DaysOfWeek"]}", "Debug")
         // schedule update for beginning and end of each time window, on selected days of the week, but irrespective of dates. When triggered, will check if current day is within the date window at that time and ignore if not
         state.scheduleMap[(j)].eachWithIndex { item, index ->
@@ -554,46 +651,44 @@ def scheduleSchedules() {
             def startMin = start.format("m")
             def startChron = "0 ${startMin} ${startHour} ? * ${daysOfWeekChron}"
             schedule(startChron, handlePeriodStart, [data: [scheduleId: j, periodId: index], overwrite: false])
-            logDebug("Scheduled start of period ${index} with chron string ${startChron}", "Debug")
+            logDebug("Scheduled start of period ${index} for schedule " +  settings["schedule${j}Name"] + " with chron string ${startChron}", "Debug")
 
             def end = toDateTime(item?.end)
             def endHour = end.format("H")
             def endMin = end.format("m")
             def endChron = "0 ${endMin} ${endHour} ? * ${daysOfWeekChron}"
             schedule(endChron, handlePeriodStop, [data: [scheduleId: j, periodId: index], overwrite: false])
-            logDebug("Scheduled end of period ${index} with chron string ${endChron}", "Debug")
+            logDebug("Scheduled end of period ${index} for schedule " +  settings["schedule${j}Name"] + " with chron string ${endChron}", "Debug")
         }
     }
 }
 
-def turnRecirculatorOn() {
-    if (!isRecirculatorOn()) {
+def controlPhysicalRecirc() {
+    if (state.recirculatorState == "on") {
         if (settings["simulationEnable"]) {
-            state.simulatedRecirculatorState = "on"
             simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On")
         }
         else {
-            recircRelay.on()
-            if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
-            notificationDevices?.deviceNotification("Recirculator On")
+            if (recircSensedState.currentSwitch != "on") {
+                recircRelay.on()
+                if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+                notificationDevices?.deviceNotification("Recirculator On")
+            }
+            else logDebug("Recirculator called to turn on, but already on. Nothing to do.", "Debug")
         }
-        state.lastOnStart = (new Date()).getTime() 
     }
-}
-
-def turnRecirculatorOff() {
-    if (!isRecirculatorOff()) {
+    else if (state.recirculatorState == "off") {
         if (settings["simulationEnable"]) {
-            state.simulatedRecirculatorState = "off"
             simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off")
         }
         else {
-            recircRelay.on()
-            if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
-            notificationDevices?.deviceNotification("Recirculator Off")
+            if (recircSensedState.currentSwitch != "off") {
+                recircRelay.on()
+                if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+                notificationDevices?.deviceNotification("Recirculator Off")
+            }
+            else logDebug("Recirculator called to turn off, but already off. Nothing to do.", "Debug")
         }
-        unschedule("delayedOffHandler")
-        logDebug("Turned off recirculator and canceled any pending delayed turning off of the recirculator.", "Debug")
     }
 }
 
@@ -601,24 +696,60 @@ def makeRelayMomentary() {
     recircRelay.off()
 }
 
+def isRecirculatorStateOn() {
+    return state.recirculatorState == "on"
+}
+
+def isRecirculatorStateOff() {
+    retuirn state.recirculatorState == "off"
+}
+
+def turnRecirculatorOn() {
+    if (!isRecirculatorOn()) {
+        state.recirculatorState = "on"
+        logDebug("Set recirculator State to on.", "Debug")
+        controlPhysicalRecirc()
+        updateWaterTempSensorSubscriptions()
+    }
+    else {
+        logDebug("Recirculator called to turn on, but state indicates already on. Nothing to do.", "Debug")
+    }
+}
+
+def turnRecirculatorOff() {
+    if (!isRecirculatorOff()) {
+        state.recirculatorState = "off"
+        state.onPeriodLastEndedAt = (new Date()).getTime()
+        unschedule("delayedOffHandler")
+        logDebug("Set recirculator State to off and unscheduled all delayedOffHandlers.", "Debug")
+        controlPhysicalRecirc()
+        updateWaterTempSensorSubscriptions()
+    } else {
+        logDebug("Recirculator called to turn off, but state indicates already off. Nothing to do.", "Debug")
+    }
+}
+
+def initializeRecirculatorState() {
+    state.recirculatorState = recircSensedState.currentSwitch
+}
+
 def manualOnHandler(evt) {     
     if (!isRecirculatorOn()) {
         def coolDownPeriodSecs = manualOnCoolDownPeriod ? (manualOnCoolDownPeriod.toInteger() * 60) : 60
-        if (state.lastManualOnTime) {
-            hasCoolDownPeriodPast = haveSecondsPast(state.lastManualOnTime, coolDownPeriodSecs)
+        if (state.onPeriodLastEndedAt) {
+            hasCoolDownPeriodPast = haveSecondsPast(state.onPeriodLastEndedAt, coolDownPeriodSecs)
             if (hasCoolDownPeriodPast == false) {
-                def minsLeft = manualOnCoolDownPeriod - howManyMinsPastSince(state.lastManualOnTime)
-                logDebug("Minimum number of minutes between manual on periods not met. Not triggering recirculator. Try again in ${minsLeft} minutes.", "Warn")
+                def minsLeft = manualOnCoolDownPeriod - howManyMinsPastSince(state.onPeriodLastEndedAt)
+                logDebug("Minimum number of minutes between manual on periods not met. Not triggering recirculator. Try again in ${minsLeft} minutes.", "Warning")
                 return
             }
         }
         turnRecirculatorOn()
         logDebug("Manually turned recirculator on.", "Debug")
-        state.lastManualOnTime = (new Date()).getTime()  
         if (settings["manualOnDuration"] && settings["manualOnDuration"]) runIn((settings["manualOnDuration"] * 60), "manualOnTimeout", [overwrite: true])
     }
     else {
-        logDebug("Attempt to manually turn on recirculator detected, but recirculator is already on. Nothing to do.", "Warn")
+        logDebug("Attempt to manually turn on recirculator detected, but recirculator is already on. Nothing to do.", "Warning")
     }
 }
 
@@ -637,13 +768,11 @@ def manualOffHandler(evt) {
 }
 
 def isRecirculatorOn() {
-    if (settings["simulationEnable"] == true) return state.simulatedRecirculatorState == "on"
-    else return recircSensedState.currentSwitch == "on"
+    return state.recirculatorState == "on"
 }
 
 def isRecirculatorOff() {
-    if (settings["simulationEnable"] == true) return state.simulatedRecirculatorState == "off"
-    else return recircSensedState.currentSwitch == "off"
+    return state.recirculatorState == "off"
 }
 
 def delayedModeOffHandler() {
@@ -662,18 +791,25 @@ def delayedModeOnHandler() {
 }
 
 def locationModeHandler(evt) {
+    logDebug("Handling location mode event ${evt.value}", "Debug")
 	if (onModes) {
         if (evt.value in onModes) {
-            if (settings["modesTurnOnDelay"] > 0) runIn((settings["modesTurnOnDelay"]*60), delayedTurnRecirculatorOn, [overwrite: false])
+            if (settings["modesTurnOnDelay"] > 0) runIn((settings["modesTurnOnDelay"]*60), delayedModeOnHandler, [overwrite: false])
             else turnRecirculatorOn()
 		}
     }
 	if (offModes) {
         if (evt.value in offModes) {
-            if (settings["modesTurnOffDelay"] > 0) runIn((settings["modesTurnOffDelay"]*60), delayedTurnRecirculatorOff, [overwrite: false])
+            if (settings["modesTurnOffDelay"] > 0) runIn((settings["modesTurnOffDelay"]*60), delayedModeOffHandler, [overwrite: false])
             else turnRecirculatorOff()
 		}
     }
+    updateTriggerSubscriptionsAndDelayedEvents()
+}
+
+def updateFromMode() {
+    if (settings["offModes"] && location?.currentMode in settings["offModes"]) turnRecirculatorOff()
+    else if (settings["onModes"] && location?.currentMode in settings["onModes"]) turnRecirculatorOn()
 }
 
 Boolean doesModeAllowRecirculatorOn() {
@@ -688,11 +824,40 @@ Boolean doesModeAllowRecirculatorOff() {
     return answer
 }
 
+Boolean inAnySpecifiedMode() {
+    def answer = false
+    if (settings["onModes"] && location?.currentMode in settings["onModes"]) answer = true
+    if (settings["offModes"] && location?.currentMode in settings["offModes"]) answer = true
+    return answer
+}
+
 
 // SCHEDULES
+def updateFromScheduledTimePeriod() {
+    def foundMatch = false
+    if (state.scheduleMap) {
+        for (j in state.scheduleMap.keySet()) {
+            if (isTodayWithinScheduleDates(j) && isScheduledDayofWeek(j)) {
+                // schedule applicable to today
+                state.scheduleMap[(j)].eachWithIndex { item, index ->
+                    if (isTimeOfDayWithinPeriod(j, index)) {
+                        if (state.scheduleMap[(j)][index].state == "on") turnRecirculatorOn()
+                        else if (state.scheduleMap[(j)][index].state == "off") turnRecirculatorOff()
+                        if (foundMatch == false) foundMatch = true
+                        else if (foundMatch == true) logDebug("Multiple overlapping time periods. Setting recirculator to state of first matching time period.", "Warning")
+                    }
+                }
+            }
+        }
+    }
+}
+
 def handlePeriodStart(data) {
+    
     def scheduleId = data.scheduleId
     def periodId = data.periodId as Integer
+
+    logDebug("Handling Start of Period " + periodId + " for schedule " + settings["schedule${scheduleId}Name"], "Debug")
 
     if (!isTodayWithinScheduleDates(scheduleId)) return // schedule not applicable to today's date
     if (!isScheduledDayofWeek(scheduleId)) return // schedule not applicable to today's day of the week
@@ -700,7 +865,7 @@ def handlePeriodStart(data) {
     // scheduled period start is applicable for today, so handle accordingly
     if (state.scheduleMap[(scheduleId)] && state.scheduleMap[(scheduleId)][periodId] && state.scheduleMap[(scheduleId)][periodId].state == "on") {
         // turn recirculator on unless Hubitat mode dictates that the recirculator be off, no matter dynamic triggers (prioritizes time schedule over dynamic triggers)
-        if (recircSensedState.currentSwitch != "on") {
+        if (!isRecirculatorOn()) {
             if (doesModeAllowRecirculatorOn()) turnRecirculatorOn()
             else logDebug("Recirculator is scheduled to turn on now, but mode does not allow it to be turned on. Nothing to do.", "Debug")
         }
@@ -708,24 +873,28 @@ def handlePeriodStart(data) {
     }
     else if (state.scheduleMap[(scheduleId)] && state.scheduleMap[(scheduleId)][periodId] && state.scheduleMap[(scheduleId)][periodId].state == "off") {
         // turn recirculator off unless Hubitat mode dictates that the recirculator be on, no matter dynamic triggers (prioritizes time schedule over dynamic triggers)
-        if (recircSensedState.currentSwitch != "off") {
+        if (!isRecirculatorOff()) {
             if (doesModeAllowRecirculatorOff()) turnRecirculatorOff()
             else logDebug("Recirculator is scheduled to turn off now, but mode does not allow it to be turned off. Nothing to do.", "Debug")
         }
         else logDebug("Recirculator is scheduled to turn off now, but recirculator is already off. Nothing to do.", "Debug")
 
     }
+    updateTriggerSubscriptionsAndDelayedEvents()
 }
 
 def handlePeriodStop(data) {
     def scheduleId = data.scheduleId
     def periodId = data.periodId as Integer
 
+    logDebug("Handling End of Period " + periodId + " for schedule " + settings["schedule${scheduleId}Name"], "Debug")
+
     if (!isTodayWithinScheduleDates(scheduleId)) return // schedule not applicable to today's date
     if (!isScheduledDayofWeek(scheduleId)) return // schedule not applicable to today's day of the week
 
     // scheduled period stop is applicable for today, so scheduled period has now ended. Update from trigger state
     updateFromTriggerState()
+    updateTriggerSubscriptionsAndDelayedEvents()
 }
 
 def isTimeOfDayWithinPeriod(scheduleId, periodId) {
@@ -739,22 +908,48 @@ def isTimeOfDayWithinPeriod(scheduleId, periodId) {
 Boolean doSchedulesAllowRecirculatorState(onOrOffState) {
     def answer = true
     def compareState = ""
-    if (onOrOffState == "On") compareState = "Off"
-    else if (onOrOffState == "Off") compareState = "On"
+    if (onOrOffState == "on") compareState = "off"
+    else if (onOrOffState == "off") compareState = "on"
     if (state.scheduleMap) {
         for (j in state.scheduleMap.keySet()) {
-            if (isTodayWithinScheduleDates(j) && isScheduledDayofWeek(k)) {
+            if (isTodayWithinScheduleDates(j) && isScheduledDayofWeek(j)) {
                 // schedule applicable to today
+                logDebug("Schedule " + settings["schedule${j}Name"] + " applicable to today. Checking Time Periods.", "Debug")
                 state.scheduleMap[(j)].eachWithIndex { item, index ->
                     // check if time periods of schedule allow for recirculator to be on right now
                     if (isTimeOfDayWithinPeriod(j, index)) {
-                        if (state.scheduleMap[(j)][index].state == compareState) answer = false
+                        if (state.scheduleMap[(j)][index].state == compareState) {
+                            answer = false
+                            return answer
+                        }
                     }
                 }
             }
+            else logDebug("Schedule " + settings["schedule${j}Name"] + " not applicable to today. Skipping time period checks.", "Debug")
         }
     }
     return answer
+}
+
+Boolean inAnyScheduledTimePeriod() {
+    def answer = false
+    if (state.scheduleMap) {
+        for (j in state.scheduleMap.keySet()) {
+            if (isTodayWithinScheduleDates(j) && isScheduledDayofWeek(j)) {
+                // schedule applicable to today
+                state.scheduleMap[(j)].eachWithIndex { item, index ->
+                    if (isTimeOfDayWithinPeriod(j, index)) {
+                        answer = true
+                        logDebug("Currently in Period ${index} for schedule " + settings["schedule${j}Name"], "Debug")
+                        return answer
+                    }
+                    else logDebug("Currently not in Period ${index} for schedule " + settings["schedule${j}Name"], "Debug")
+                }
+            }
+            else logDebug("Schedule " + settings["schedule${j}Name"] + " not applicable to today. Skipping time period checks.", "Debug")
+        }
+    }
+    return answer    
 }
 
 def isWithinTime(time1, time2) {
@@ -783,19 +978,37 @@ def isTodayWithinScheduleDates(scheduleId) {
     def sDay = startDay.toInteger()
     def eMonth = monthsMap[stopMonth]
     def eDay = stopDay.toInteger()
-        
-    if ((sMonth != null && sDay != null) && ((month == sMonth && day >= sDay) || month > sMonth))  {
-        if ((eMonth != null && eDay != null) && ((month == eMonth && day <= eDay) || month < eMonth)) {
-		     withinDates = true
+
+    if ((sMonth != null && sDay != null && eMonth != null && eDay != null)) {
+        if ((sMonth < eMonth) || (sMonth == eMonth && sDay < eDay)) {
+            // start day occurs before end day (schedule stays within a single year)
+            if ((month == sMonth && day >= sDay) || month > sMonth)  {
+                if ((month == eMonth && day <= eDay) || month < eMonth) {
+                    withinDates = true
+                }
+            }
         }
+        else if ((sMonth > eMonth) || (sMonth == eMonth && sDay > eDay)) {
+            // start day occurs after end day (schedule wraps around to new year)
+            if ((month == eMonth && day >= eDay) || month > eMonth)  {
+                if ((month == sMonth && day <= sDay) || month < sMonth) {
+                    withinDates = true
+                }
+            }
+        }
+        else if (sMonth == eMonth && sDay == eDay) logDebug("Start day and End day of schedule the same. Invalid schedule.", "Warning")
     }
+    else logDebug("schedule dates have null value. Aborting schedule check.", "Warning")
+        
+
     return withinDates
 }
 
 def isScheduledDayofWeek(scheduleId) {
     def answer = false    
-    def dayOfWeek = (new Date()).format('EEEE') 
-    if(settings["schedule${scheduleId}DaysOfWeek"] && settings["schedule${scheduleId}DaysOfWeek"].contains(dayOfWeek)) answer = true 
+    def today = (new Date()).format('EEEE') 
+    def shortToday = daysOfWeekShortMap[today]
+    if(settings["schedule${scheduleId}DaysOfWeek"] && (settings["schedule${scheduleId}DaysOfWeek"].contains(today) || settings["schedule${scheduleId}DaysOfWeek"].contains(shortToday))) answer = true 
     return answer
 }
 
@@ -811,7 +1024,6 @@ def getDayOfWeek(Date date) {
 // DYNAMIC TRIGGERS
 def handleTriggerOnEvent(evt) {
     logDebug("handleTriggerTriggered() ${evt.device?.label} (${evt.device?.id}) ${evt.name}: ${evt.value}", "Trace")
-    if (doesModeAllowRecirculatorOn() && doSchedulesAllowRecirculatorState("On")) {
         if (isRecirculatorOff() || (isRecirculatorOn() && settings["maxDurationExtendable"] == true)) {
             // trigger on with device either if recirculator is off or if recirculator is on but the on duration period should be extended by this device trigger|
             logDebug("${evt.device?.label} (${evt.device?.id}) triggered on period. Cancelled any pending delayed turn off of recirculator.", "Debug")
@@ -819,8 +1031,6 @@ def handleTriggerOnEvent(evt) {
             triggerOn()
         }
         else logDebug("${evt.device?.label} triggered on period but recirculator is already on and maximum duration of the on period is not configured in app settings to extend the maximum on period duration", "Debug")
-    }
-    else logDebug("${evt.device?.label} triggered on period but the Hubitat mode or the recirculator schedule does not allow the recirculator to turn on", "Debug")
 }
 
 def handleMotionOff(evt) {
@@ -857,43 +1067,36 @@ def handleFlumeOff(evt) {
 
 def handleTriggerOffEvent(evt, turnOffDelay) {
     logDebug("handleTriggerOffEvent() ${evt.device?.label} (${evt.device?.id}) ${evt.name}: ${evt.value}", "Trace")
-    if (doesModeAllowRecirculatorOff() && doSchedulesAllowRecirculatorState("Off")) {
         if (isRecirculatorOn()) {
             if (turnOffDelay > 0) {
                 runIn(turnOffDelay * 60, "delayedOffHandler", [overwrite: false, data: [device: "${evt.device?.label}"]])
                 logDebug("${evt.device?.label} (${evt.device?.id}) triggered off period after delay. Scheduled recirculator to turn off in " + turnOffDelay + " minutes.", "Debug")
             }
-            else triggerOff()
+            else {
+                logDebug("${evt.device?.label} (${evt.device?.id}) triggered off period. Calling triggerOff()", "Debug")
+                triggerOff()
+            } 
         }
         else logDebug("${evt.device?.label} (${evt.device?.id}) triggered off period but recirculator is already off. Nothing to do.", "Debug")
-    }
-    else logDebug("${evt.device?.label} (${evt.device?.id}) triggered off period but the Hubitat mode or the recirculator schedule now does not allow the recirculator to turn off", "Debug")
 }
 
 def delayedOffHandler(data) {
     logDebug("Executing delayeOffHandler() triggered by ${data.device}...", "Trace")
-    if (doesModeAllowRecirculatorOff() && doSchedulesAllowRecirculatorState("Off")) {
-        // trigger off could be from a delayed action, so make sure that mode and schedule still allow to turn off
-        triggerOff()
-    }
-    else logDebug("Delayed turn off triggered by ${data.device} but the Hubitat mode or the recirculator schedule now does not allow the recirculator to turn off. Keeping on.", "Debug")
+    triggerOff()
 }
 
 def triggerOn() {   
     logDebug("Executing triggerOn()...", "Trace")
-    if (isRecirculatorOff() && state.lastTriggeredPeriodEndedAt) {
+    if (isRecirculatorOff() && state.onPeriodLastEndedAt) {
         def coolDownPeriodSecs = triggerOnCoolDownPeriod ? (triggerOnCoolDownPeriod.toInteger() * 60) : 60
-        def hasCoolDownPeriodPast = haveSecondsPast(state.lastTriggeredPeriodEndedAt, coolDownPeriodSecs)
+        def hasCoolDownPeriodPast = haveSecondsPast(state.onPeriodLastEndedAt, coolDownPeriodSecs)
         if (hasCoolDownPeriodPast == false) {
-            def minsLeft = triggerOnCoolDownPeriod.toInteger() - howManyMinsPastSince(state.lastTriggeredPeriodEndedAt)
+            def minsLeft = triggerOnCoolDownPeriod.toInteger() - howManyMinsPastSince(state.onPeriodLastEndedAt)
             logDebug("Minimum number of minutes between dynamically triggered on periods not met (${minsLeft} minutes left in cooldown period). Not triggering recirculator, but will check again in ${minsLeft} minutes.", "Warning")
             runIn(minsLeft * 60, updateFromTriggerState)
             return
         }
     }
-    
-    if (isRecirculatorOff()) state.lastTriggerOnStart = (new Date()).getTime() // time when the triggered on period starts, no matter if other triggers occur during the period
-    state.lastTriggeredOnAt = (new Date()).getTime()  // last time a trigger occurred, either at the start of the on period or in the middle of it
     
     turnRecirculatorOn() // will only turn on if already off
 
@@ -903,14 +1106,12 @@ def triggerOn() {
 
 def handleTriggerOnMaxDurationReached() {
     logDebug("Executing handleTriggerOnMaxDurationReached() ...", "Trace")
-    if (doesModeAllowRecirculatorOff() && doSchedulesAllowRecirculatorState("Off")) triggerOff(true)
-    else logDebug("Triggered on period timed out with max on duration, but now Hubitat mode or recirculator time schedule dictates that the recirculator be on. Leaving recirculator on.", "Debug")
+    triggerOff(true)
 }
 
 def triggerOff(maxDurationReached = false) {
     logDebug("Executing triggerOff()...", "Trace")
     if (maxDurationReached || areAllTriggersOff()) {
-        if (!isRecirculatorOff()) state.lastTriggeredPeriodEndedAt = (new Date()).getTime()
         turnRecirculatorOff()
     }
     else logDebug("Triggerd off, but either max duration is not reached or all triggers are not off. Keeping on.", "Debug")
@@ -968,13 +1169,16 @@ def triggerTempHandler(evt) {
 }
 
 def updateFromTriggerState() {
-    if (isRecirculatorOff() && !areAllTriggersOff() && doesModeAllowRecirculatorOn() && doSchedulesAllowRecirculatorState("On")) {
+    if (isRecirculatorOff() && !areAllTriggersOff() && doesModeAllowRecirculatorOn() && doSchedulesAllowRecirculatorState("on")) {
         // check current state of trigger devices and turn recirculator on if state of trigger devices indicates it should be on and mode allows it to be on
         triggerOn()
+        logDebug("Turned Recirculator on based on state of dynamic triggers", "Debug")
     }
-    else if (isRecirculatorOn() && areAllTriggersOff() && doesModeAllowRecirculatorOff() && doSchedulesAllowRecirculatorState("Off")) {
+    else if (isRecirculatorOn() && areAllTriggersOff() && doesModeAllowRecirculatorOff() && doSchedulesAllowRecirculatorState("off")) {
         triggerOff()
+        logDebug("Turned Recirculator off based on state of dynamic triggers", "Debug")
     }
+    else logDebug("State of Recirculator is already consistent with state of dynamic triggers. Nothing to do.", "Debug")
 }
 
 private Boolean haveSecondsPast(timestamp, seconds=1) {
