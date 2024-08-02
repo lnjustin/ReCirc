@@ -18,6 +18,7 @@
  *
  * Change Log
  * -----------
+ * v.0.2.2 - make sensed state switch optional
  * v.0.2.1 - bug fixes; early version of water temp sensor handling
  * v.0.2.0 - bug fixes with modes and schedules; optimized to unsubscribe from trigger events if mode or schedule active; added support for schedules that wrap around to new year
  * v.0.1.2 - bug fix with schedules
@@ -75,7 +76,8 @@ def setupApp() {
             input name: "recircRelay", type: "capability.switch", title: "Physical Relay to toggle the on/off state of the recirculator", multiple: false, required: true
             if (recircRelay) input name: "recircRelayMomentary", type: "bool", title: "Make the Physical Relay a momentary switch?", multiple: false, required: true, submitOnChange: true
             if (recircRelayMomentary) input name: "momentaryDelay", type: "number", title: "Delay before turning off Physical Relay (seconds)", required: true
-            input name: "recircSensedState", type: "capability.switch", title: "Switch representing sensed state of the recirculator", multiple: false, required: true
+            input name: "recircSensedState", type: "capability.switch", title: "Switch representing sensed state of the recirculator", multiple: false, required: false
+            paragraph getInterface("note", " If the physical relay is a momentary switch, such as with a dry contact relay, specifying a sensed state switch will safeguard against undesirable toggling if the relay state gets out of sync with the recirculator.")
         }
         
 		section() {
@@ -677,7 +679,7 @@ def controlPhysicalRecirc() {
                 simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On")
             }
             else {
-                if (recircSensedState.currentSwitch != "on") {
+                if (recircSensedState == null || recircSensedState.currentSwitch != "on") {
                     recircRelay.on()
                     if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
                     notificationDevices?.deviceNotification("Recirculator On")
@@ -691,7 +693,7 @@ def controlPhysicalRecirc() {
             simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off")
         }
         else {
-            if (recircSensedState.currentSwitch != "off") {
+            if (recircSensedState == null || recircSensedState.currentSwitch != "off") {
                 recircRelay.on()
                 if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
                 notificationDevices?.deviceNotification("Recirculator Off")
@@ -715,7 +717,7 @@ def cycleRelayWithSubState() {
             simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On Cycle Until Come Up To Temp")
         }
         else {
-            if (recircSensedState.currentSwitch != "on") {
+            if (recircSensedState == null || recircSensedState.currentSwitch != "on") {
                 recircRelay.on()
                 if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
                 notificationDevices?.deviceNotification("Recirculator On Cycle Until Come Up To Temp")
@@ -728,7 +730,7 @@ def cycleRelayWithSubState() {
             simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off Cycle While Up To Temp")
         }
         else {
-            if (recircSensedState.currentSwitch != "off") {
+            if (recircSensedState == null || recircSensedState.currentSwitch != "off") {
                 recircRelay.on()
                 if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
                 notificationDevices?.deviceNotification("Recirculator Off Cycle While Up To Temp")
@@ -813,7 +815,8 @@ def turnRecirculatorOff() {
 }
 
 def initializeRecirculatorState() {
-    state.recirculatorState = recircSensedState.currentSwitch
+    if (recircSensedState != null) state.recirculatorState = recircSensedState.currentSwitch
+    else state.recirculatorState = recircRelay.currentSwitch
 }
 
 def manualOnHandler(evt) {     
