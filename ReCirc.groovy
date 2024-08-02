@@ -18,6 +18,7 @@
  *
  * Change Log
  * -----------
+ * v.0.2.1 - bug fixes; early version of water temp sensor handling
  * v.0.2.0 - bug fixes with modes and schedules; optimized to unsubscribe from trigger events if mode or schedule active; added support for schedules that wrap around to new year
  * v.0.1.2 - bug fix with schedules
  * v.0.1.1 - update momentary relay settings and make delay configurable
@@ -183,7 +184,7 @@ def setupApp() {
 
         section() {
             
-            paragraph getInterface("header", " Water Temperature Control (still in beta development - not yet implemented)")
+            paragraph getInterface("header", " Water Temperature Control")
             paragraph getInterface("note", " Some recirculation systems automatically turn on/off as needed to maintain water temperature between temperature setpoints. If your recriculation system does not do this automatically, you can use the controls below to do it via Hubitat.")
             input name: "waterTempControlType", type: "enum", options: ["singleValue" : "Value of single temp sensor", "differenceValue" : "Temp Sensor 2 - Temp Sensor 1"], title: "Control Based On...", required: false
             if (waterTempControlType == "singleValue") {
@@ -485,6 +486,8 @@ def initialize() {
 
     initializeRecirculatorState()
 
+    setRecirculatorOnOffOnInitialize()
+
     updateTriggerSubscriptionsAndDelayedEvents()
 
     updateWaterTempSensorSubscriptions()
@@ -665,16 +668,22 @@ def scheduleSchedules() {
 
 def controlPhysicalRecirc() {
     if (state.recirculatorState == "on") {
-        if (settings["simulationEnable"]) {
-            simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On")
+        if (waterTempControlType != null) {
+            initializeRecirculatorSubState()
+            updateRecirculatorSubState()
         }
         else {
-            if (recircSensedState.currentSwitch != "on") {
-                recircRelay.on()
-                if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
-                notificationDevices?.deviceNotification("Recirculator On")
+            if (settings["simulationEnable"]) {
+                simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On")
             }
-            else logDebug("Recirculator called to turn on, but already on. Nothing to do.", "Debug")
+            else {
+                if (recircSensedState.currentSwitch != "on") {
+                    recircRelay.on()
+                    if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+                    notificationDevices?.deviceNotification("Recirculator On")
+                }
+                else logDebug("Recirculator called to turn on, but already on. Nothing to do.", "Debug")
+            }
         }
     }
     else if (state.recirculatorState == "off") {
@@ -694,6 +703,80 @@ def controlPhysicalRecirc() {
 
 def makeRelayMomentary() {
     recircRelay.off()
+}
+
+def waterTempHandler(evt) {
+    updateRecirculatorSubState()
+}
+
+def cycleRelayWithSubState() {
+    if (state.recirculatorSubState == "on") {
+        if (settings["simulationEnable"]) {
+            simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On Cycle Until Come Up To Temp")
+        }
+        else {
+            if (recircSensedState.currentSwitch != "on") {
+                recircRelay.on()
+                if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+                notificationDevices?.deviceNotification("Recirculator On Cycle Until Come Up To Temp")
+            }
+            else logDebug("Recirculator called to turn on for a cycle based on water temp, but already on. Nothing to do.", "Debug")
+        }
+    }
+    else if (state.recirculatorSubState == "off") {
+        if (settings["simulationEnable"]) {
+            simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off Cycle While Up To Temp")
+        }
+        else {
+            if (recircSensedState.currentSwitch != "off") {
+                recircRelay.on()
+                if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+                notificationDevices?.deviceNotification("Recirculator Off Cycle While Up To Temp")
+            }
+            else logDebug("Recirculator called to turn off for a cycle based on water temp, but already off. Nothing to do.", "Debug")
+        }
+    }
+}
+
+def initializeRecirculatorSubState() {
+    state.recirculatorSubState = null
+    state.coolDownWaterTemp = null
+}
+
+def updateRecirculatorSubState() {
+    def oldSubState = state.recirculatorSubState
+    if (waterTempControlType == "singleValue" && settings["waterTempSensor1"] && settings["turnOffTemp"] && settings["turnOnTemp"]) {
+        def temp = settings["waterTempSensor1"].latestValue("temperature")
+        if (temp >= settings["turnOffTemp"]) {
+            state.recirculatorSubState = "off"
+            state.coolDownWaterTemp = true
+        }
+        else if (temp < settings["turnOffTemp"] && temp > settings["turnOnTemp"]) {
+            if (state.coolDownWaterTemp == null || !state.coolDownWaterTemp) state.recirculatorSubState = "on" // haven't reached turn off temp yet
+            else if (state.coolDownWaterTemp == true) state.recirculatorSubState = "off" // have reached turn off temp and need to cool down
+        }
+        else if (temp <= settings["turnOnTemp"]) {
+            state.recirculatorSubState = "on"
+            state.coolDownWaterTemp = false
+        }
+    }
+    else if (waterTempControlType == "differenceValue" && settings["waterTempSensor1"] && settings["waterTempSensor2"]) {
+        def diff = settings["waterTempSensor2"].latestValue("temperature") - settings["waterTempSensor1"].latestValue("temperature")
+        if (diff <= settings["turnOffDiffTemp"]) {
+            state.recirculatorSubState = "off"
+            state.coolDownWaterTemp = true
+        }
+        else if (diff > settings["turnOffDiffTemp"] && diff < settings["turnOnDiffTemp"]) {
+            if (state.coolDownWaterTemp == null || !state.coolDownWaterTemp) state.recirculatorSubState = "on" // haven't reached turn off temp diff yet
+            else if (state.coolDownWaterTemp == true) state.recirculatorSubState = "off" // have reached turn off diff temp and need to cool down
+        }
+        else if (diff >= settings["turnOnDiffTemp"]) {
+            state.recirculatorSubState = "on"
+            state.coolDownWaterTemp = false
+        }        
+    }
+    else state.recirculatorSubState = null
+    if (oldSubState != state.recirculatorSubState) cycleRelayWithSubState()
 }
 
 def isRecirculatorStateOn() {
@@ -720,7 +803,7 @@ def turnRecirculatorOff() {
     if (!isRecirculatorOff()) {
         state.recirculatorState = "off"
         state.onPeriodLastEndedAt = (new Date()).getTime()
-        unschedule("delayedOffHandler")
+        cancelDelayedTriggerEvents()
         logDebug("Set recirculator State to off and unscheduled all delayedOffHandlers.", "Debug")
         controlPhysicalRecirc()
         updateWaterTempSensorSubscriptions()
@@ -739,8 +822,8 @@ def manualOnHandler(evt) {
         if (state.onPeriodLastEndedAt) {
             hasCoolDownPeriodPast = haveSecondsPast(state.onPeriodLastEndedAt, coolDownPeriodSecs)
             if (hasCoolDownPeriodPast == false) {
-                def minsLeft = manualOnCoolDownPeriod - howManyMinsPastSince(state.onPeriodLastEndedAt)
-                logDebug("Minimum number of minutes between manual on periods not met. Not triggering recirculator. Try again in ${minsLeft} minutes.", "Warning")
+                def secsLeft = coolDownPeriodSecs - howManySecsPastSince(state.onPeriodLastEndedAt)
+                logDebug("Minimum duration between manual on periods not met. Not triggering recirculator. Try again in ${secsLeft} seconds.", "Warning")
                 return
             }
         }
@@ -834,6 +917,7 @@ Boolean inAnySpecifiedMode() {
 
 // SCHEDULES
 def updateFromScheduledTimePeriod() {
+    logDebug("Updating Recirculator State From Scheduled Time Period.", "Debug")
     def foundMatch = false
     if (state.scheduleMap) {
         for (j in state.scheduleMap.keySet()) {
@@ -841,8 +925,14 @@ def updateFromScheduledTimePeriod() {
                 // schedule applicable to today
                 state.scheduleMap[(j)].eachWithIndex { item, index ->
                     if (isTimeOfDayWithinPeriod(j, index)) {
-                        if (state.scheduleMap[(j)][index].state == "on") turnRecirculatorOn()
-                        else if (state.scheduleMap[(j)][index].state == "off") turnRecirculatorOff()
+                        if (state.scheduleMap[(j)][index].state == "on") {
+                            logDebug("Recirculator scheduled to be on. Turning on.", "Debug")
+                            turnRecirculatorOn()
+                        }
+                        else if (state.scheduleMap[(j)][index].state == "off") {
+                            turnRecirculatorOff()
+                            logDebug("Recirculator scheduled to be off. Turning off.", "Debug")
+                        }
                         if (foundMatch == false) foundMatch = true
                         else if (foundMatch == true) logDebug("Multiple overlapping time periods. Setting recirculator to state of first matching time period.", "Warning")
                     }
@@ -899,9 +989,12 @@ def handlePeriodStop(data) {
 
 def isTimeOfDayWithinPeriod(scheduleId, periodId) {
     def answer = false
-    def start = toDateTime(state.scheduleMap[(scheduleId)][periodId].start)
-    def end = toDateTime(state.scheduleMap[(scheduleId)][periodId].end)
+    def startReference = toDateTime(state.scheduleMap[(scheduleId)][periodId].start)
+    def start = getTodayAtSameTime(startReference)
+    def endReference = toDateTime(state.scheduleMap[(scheduleId)][periodId].end)
+    def end = getTodayAtSameTime(endReference)
     if (start && end && timeOfDayIsBetween(start, end, new Date(), location.timeZone)) answer = true
+    logDebug("Schedule " + settings["schedule${scheduleId}Name"] + " Period ${periodId} starts at ${start} and ends at ${end}. Current time between start and end? ${answer}", "Debug")
     return answer
 }
 
@@ -952,15 +1045,22 @@ Boolean inAnyScheduledTimePeriod() {
     return answer    
 }
 
-def isWithinTime(time1, time2) {
-    def withinTime = false
-    
-    def windowStart = new Date(time1)
-    def windowEnd = new Date(time2)
-    if (timeOfDayIsBetween(windowStart, windowEnd, new Date(), location.timeZone)) {
-        withinTime = true
-    }
-    return withinTime
+def getTodayAtSameTime(timeReferenceDate) {
+    Date today = new Date()
+    def timeMap = getTimeMapFromDateTime(timeReferenceDate)
+    def atHour = timeMap.hour
+    def atMinutes = timeMap.minutes
+    Date todayAtTime = today.copyWith(hourOfDay: atHour, minute: atMinutes, seconds: 0)
+    return todayAtTime
+}
+
+def getTimeMapFromDateTime(dateTime) {
+    Calendar cal = Calendar.getInstance()
+    cal.setTimeZone(location.timeZone)
+    cal.setTime(dateTime)
+    def hour = cal.get(Calendar.HOUR_OF_DAY)
+    def minutes = cal.get(Calendar.MINUTE)
+    return [hour: hour, minutes: minutes]
 }
 
 def isTodayWithinScheduleDates(scheduleId) {
@@ -979,7 +1079,7 @@ def isTodayWithinScheduleDates(scheduleId) {
     def eMonth = monthsMap[stopMonth]
     def eDay = stopDay.toInteger()
 
-    if ((sMonth != null && sDay != null && eMonth != null && eDay != null)) {
+    if (sMonth != null && sDay != null && eMonth != null && eDay != null) {
         if ((sMonth < eMonth) || (sMonth == eMonth && sDay < eDay)) {
             // start day occurs before end day (schedule stays within a single year)
             if ((month == sMonth && day >= sDay) || month > sMonth)  {
@@ -990,17 +1090,17 @@ def isTodayWithinScheduleDates(scheduleId) {
         }
         else if ((sMonth > eMonth) || (sMonth == eMonth && sDay > eDay)) {
             // start day occurs after end day (schedule wraps around to new year)
-            if ((month == eMonth && day >= eDay) || month > eMonth)  {
-                if ((month == sMonth && day <= sDay) || month < sMonth) {
-                    withinDates = true
-                }
+            if ((month == sMonth && day >= sDay) || month > sMonth) {
+                withinDates = true
+            }
+            else if ((month == eMonth && day <= eDay) || month < eMonth)  {
+                withinDates = true
             }
         }
         else if (sMonth == eMonth && sDay == eDay) logDebug("Start day and End day of schedule the same. Invalid schedule.", "Warning")
     }
     else logDebug("schedule dates have null value. Aborting schedule check.", "Warning")
         
-
     return withinDates
 }
 
@@ -1091,9 +1191,9 @@ def triggerOn() {
         def coolDownPeriodSecs = triggerOnCoolDownPeriod ? (triggerOnCoolDownPeriod.toInteger() * 60) : 60
         def hasCoolDownPeriodPast = haveSecondsPast(state.onPeriodLastEndedAt, coolDownPeriodSecs)
         if (hasCoolDownPeriodPast == false) {
-            def minsLeft = triggerOnCoolDownPeriod.toInteger() - howManyMinsPastSince(state.onPeriodLastEndedAt)
-            logDebug("Minimum number of minutes between dynamically triggered on periods not met (${minsLeft} minutes left in cooldown period). Not triggering recirculator, but will check again in ${minsLeft} minutes.", "Warning")
-            runIn(minsLeft * 60, updateFromTriggerState)
+            def secsLeft = coolDownPeriodSecs - howManySecsPastSince(state.onPeriodLastEndedAt)
+            logDebug("Minimum duration between dynamically triggered on periods not met (${secsLeft} seconds left in cooldown period). Not triggering recirculator, but will check again in ${secsLeft} seconds.", "Warning")
+            if (secsLeft > 0) runIn(secsLeft, "updateFromTriggerState")
             return
         }
     }
@@ -1194,7 +1294,7 @@ private Boolean haveSecondsPast(timestamp, seconds=1) {
 	return (new Date().getTime() - timestamp) > (seconds * 1000)
 }
 
-private def howManyMinsPastSince(timestamp) {
+private def howManySecsPastSince(timestamp) {
 	if (!(timestamp instanceof Number)) {
 		if (timestamp instanceof Date) {
 			timestamp = timestamp.getTime()
@@ -1204,7 +1304,7 @@ private def howManyMinsPastSince(timestamp) {
 			return true
 		}
 	}
-	return (new Date().getTime() - timestamp) / (1000 * 60)
+	return (new Date().getTime() - timestamp) / 1000
 }
 
 def getInterface(type, txt="", link="") {
