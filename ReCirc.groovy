@@ -18,6 +18,10 @@
  *
  * Change Log
  * -----------
+ * v.0.2.6 - reverted to stateless recirc on/off control while maintaining water temp substate
+ * v.0.2.5 - added ability to prioritize a schedule over select mode(s)
+ * v.0.2.4 - fix shorter delayed off from triggering off when still have longer delayed off pending
+ * v.0.2.3 - bug fixes
  * v.0.2.2 - make sensed state switch optional
  * v.0.2.1 - bug fixes; early version of water temp sensor handling
  * v.0.2.0 - bug fixes with modes and schedules; optimized to unsubscribe from trigger events if mode or schedule active; added support for schedules that wrap around to new year
@@ -94,12 +98,12 @@ def setupApp() {
         section() {
             paragraph getInterface("header", " Recirculator Mode Controls")
 	        input name: "offModes",  type: "mode", title: "Hubitat Mode(s) in which to turn the recirculator off", multiple: true, required: false, width: 6
-            if (offModes) input name: "modesTurnOffDelay", type: "number", title: "After how long of a delay, if any, since entering the mode(s) (minutes)?", required: true, defaultValue: 0, multiple: false, width: 6
+            if (offModes) input name: "modesTurnOffDelay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 6
             paragraph getInterface("note", "In these modes, the recirculator will remain off, even if the recirculator would otherwise be scheduled to be on and even if dynamic triggers would otherwise trigger the recirculator to turn on."), width: 12
               
 
 	        input name: "onModes",  type: "mode", title: "Hubitat Mode(s) in which to turn the recirculator on", multiple: true, required: false, width: 6
-            if (offModes) input name: "modesTurnOnDelay", type: "number", title: "After how long of a delay, if any, since entering the mode(s) (minutes)?", required: true, defaultValue: 0, multiple: false, width: 6
+            if (offModes) input name: "modesTurnOnDelay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 6
             paragraph getInterface("note", "In these modes, the recirculator will remain on, even if the recirculator would otherwise be scheduled to be off and even if dynamic triggers would otherwise trigger the recirculator to turn off."), width: 12
                     
 
@@ -117,48 +121,88 @@ def setupApp() {
             paragraph ""
 			input name: "motionSensors", type: "capability.motionSensor", title: "On when motion is detected in any of these places", multiple: true, required: false, refreshAfterSelection: true, submitOnChange: true
 			if (settings.motionSensors) {
-                input name: "turnOffWhenMotionStops", type: "bool", title: "Off when motion stops everywhere?", defaultValue: false, submitOnChange: true
-                if (turnOffWhenMotionStops) input name: "turnOffWhenMotionStopsDelay", type: "number", title: "How long of a delay, if any, until turning off after motion stops (minutes)?", required: true, defaultValue: 0, multiple: false
+                input name: "motionSensorsPriority", type: "enum", title: "Priority", options: ["low":"Below Modes and Schedules", "medium":"Below Modes, Above Schedules", "high":"Above Modes and Schedules"], defaultValue: "low", required: false, multiple: false, width: 4
+                paragraph "", width: 8
+                input name: "turnOffWhenMotionStops", type: "bool", title: "Off when motion stops everywhere?", defaultValue: false, submitOnChange: true, width: 5
+                if (turnOffWhenMotionStops) input name: "turnOffWhenMotionStopsDelay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 7
             }
 
             paragraph ""
 			input name: "arrivePresenceSensors", type: "capability.presenceSensor", title: "On when presence arrives at any of these places", multiple: true, required: false, refreshAfterSelection: true, submitOnChange: true
 			if (settings.arrivePresenceSensors) {
-                input name: "turnOffWhenAllNotPresent", type: "bool", title: "Off when all presence sensors are not present?", defaultValue: false, submitOnChange: true
-                if (turnOffWhenPresenceDeparts) input name: "turnOffWhenAllNotPresentDelay", type: "number", title: "How long of a delay, if any, until turning off after all presence sensors are not present (minutes)?", required: true, defaultValue: 0, multiple: false
+                input name: "arrivePresenceSensorsPriority", type: "enum", title: "Priority", options: ["low":"Below Modes and Schedules", "medium":"Below Modes, Above Schedules", "high":"Above Modes and Schedules"], defaultValue: "low", required: false, multiple: false, width: 4
+                paragraph "", width: 8
+                input name: "turnOffWhenAllNotPresent", type: "bool", title: "Off when all presence sensors are not present?", defaultValue: false, submitOnChange: true, width: 5
+                if (turnOffWhenPresenceDeparts) input name: "turnOffWhenAllNotPresentDelay", type: "number", title: "After how long of a delay, if any  (minutes)?", required: true, defaultValue: 0, multiple: false, width: 7
             }
 
             paragraph ""
 			input name: "departPresenceSensors", type: "capability.presenceSensor", title: "On when presence departs from any of these places", multiple: true, required: false, refreshAfterSelection: true, submitOnChange: true
 			if (settings.departPresenceSensors) {
-                input name: "turnOffWhenAllPresent", type: "bool", title: "Off when all presence sensors are present?", defaultValue: false, submitOnChange: true
-                if (turnOffWhenPresenceDeparts) input name: "turnOffWhenAllPresentDelay", type: "number", title: "How long of a delay, if any, until turning off after all presence sensors are present (minutes)?", required: true, defaultValue: 0, multiple: false
+                input name: "departPresenceSensorsPriority", type: "enum", title: "Priority", options: ["low":"Below Modes and Schedules", "medium":"Below Modes, Above Schedules", "high":"Above Modes and Schedules"], defaultValue: "low", required: false, multiple: false, width: 4
+                paragraph "", width: 8
+                input name: "turnOffWhenAllPresent", type: "bool", title: "Off when all presence sensors are present?", defaultValue: false, submitOnChange: true, width: 5
+                if (turnOffWhenPresenceDeparts) input name: "turnOffWhenAllPresentDelay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 7
             }
 
 			paragraph ""
 			input name: "openContactSensors", type: "capability.contactSensor", title: "On when any of these things open", multiple: true, required: false, refreshAfterSelection: true, submitOnChange: true
 			if (settings.openContactSensors) {
-				input name: "turnOffWhenReclose", type: "bool", title: "Off when all of these things re-close?", defaultValue: false, submitOnChange: true
-                if (turnOffWhenReclose) input name: "turnOffWhenRecloseDelay", type: "number", title: "How long of a delay, if any, until turning off after all of these things close (minutes)?", required: true, defaultValue: 0, multiple: false
+                input name: "openContactSensorsPriority", type: "enum", title: "Priority", options: ["low":"Below Modes and Schedules", "medium":"Below Modes, Above Schedules", "high":"Above Modes and Schedules"], defaultValue: "low", required: false, multiple: false, width: 4
+                paragraph "", width: 8
+				input name: "turnOffWhenReclose", type: "bool", title: "Off when all of these things re-close?", defaultValue: false, submitOnChange: true, width: 5
+                if (turnOffWhenReclose) input name: "turnOffWhenRecloseDelay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 7
 			}
 			
 			paragraph ""
 			input name: "closeContactSensors", type: "capability.contactSensor", title: "On when any of these things close", multiple: true, required: false, refreshAfterSelection: true, submitOnChange: true
 			if (settings.closeContactSensors) {
-				input name: "turnOffWhenReopen", type: "bool", title: "Off when all of these things re-open?", defaultValue: false, submitOnChange: true
-                if (turnOffWhenReopen) input name: "turnOffWhenReopenDelay", type: "number", title: "How long of a delay, if any, until turning off after all of these things open (minutes)?", required: true, defaultValue: 0, multiple: false
+                input name: "closeContactSensorsPriority", type: "enum", title: "Priority", options: ["low":"Below Modes and Schedules", "medium":"Below Modes, Above Schedules", "high":"Above Modes and Schedules"], defaultValue: "low", required: false, multiple: false, width: 4
+                paragraph "", width: 8
+				input name: "turnOffWhenReopen", type: "bool", title: "Off when all of these things re-open?", defaultValue: false, submitOnChange: true, width: 5
+                if (turnOffWhenReopen) input name: "turnOffWhenReopenDelay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 7
 			}
 
 			paragraph ""
 			input name: "onSwitches", type: "capability.switch", title: "On with any of these switches", multiple: true, required: false, refreshAfterSelection: true, submitOnChange: true
 			if (settings.onSwitches) {
-				input name: "turnOffWithSwitches", type: "bool", title: "Off when all switches turn off?", defaultValue: false, submitOnChange: true
-                if (turnOffWithSwitches) input name: "turnOffWithSwitchesDelay", type: "number", title: "How long of a delay, if any, until turning off recirculator after all switches turn off (minutes)?", required: true, defaultValue: 0, multiple: false
+                input name: "onSwitchesPriority", type: "enum", title: "Priority", options: ["low":"Below Modes and Schedules", "medium":"Below Modes, Above Schedules", "high":"Above Modes and Schedules"], defaultValue: "low", required: false, multiple: false, width: 4
+                paragraph "", width: 8
+				input name: "turnOffWithSwitches", type: "bool", title: "Off when all switches turn off?", defaultValue: false, submitOnChange: true, width: 5
+                if (turnOffWithSwitches) input name: "turnOffWithSwitchesDelay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 7
+			}
+
+			paragraph ""
+			input name: "customDevices1", type: "capability.*", title: "On when a specified attribute of any of these devices changes to a specified value", multiple: true, required: false, refreshAfterSelection: true, submitOnChange: true
+            paragraph getInterface("note", "Example use: Dishwasher smart plug device using 'Zooz Power Switch with States' driver to specify when dishwasher is idle or running. If select multiple devices, all devices must have the same attribute.")
+			if (settings.customDevices1) {
+                def enumOptions = getEnumOptions(settings["customDevices1"])
+                input name: "customDevice1Attribute", type: "enum", title: "Select attribute...", options: enumOptions, multiple: false, required: true, submitOnChange: true, width: 6
+                input name: "customDevice1AttributeValue", type: "string", title: "On when attribute value change to:", multiple: false, required: true, submitOnChange: true, width: 6
+                input name: "customDevice1Priority", type: "enum", title: "Priority", options: ["low":"Below Modes and Schedules", "medium":"Below Modes, Above Schedules", "high":"Above Modes and Schedules"], defaultValue: "low", required: false, multiple: false, width: 4
+                paragraph "", width: 8
+                input name: "turnOffWithCustomDevice1", type: "bool", title: "Off when the specified attribute of all of the devices changes away from the specific value?", defaultValue: false, submitOnChange: true, width: 5
+                if (turnOffWithCustomDevice1) input name: "turnOffWithCustomDevice1Delay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 7
+			}
+
+			paragraph ""
+			input name: "customDevices2", type: "capability.*", title: "On when a specified attribute of any of these devices changes to a specified value", multiple: true, required: false, refreshAfterSelection: true, submitOnChange: true
+            paragraph getInterface("note", "Example use: Washing Machine smart plug device using 'Zooz Power Switch with States' driver to specify when washing machine is idle or running. If select multiple devices, all devices must have the same attribute.")
+			if (settings.customDevices2) {
+                def enumOptions = getEnumOptions(settings["customDevices2"])
+                input name: "customDevice2Attribute", type: "enum", title: "Select attribute...", options: enumOptions, multiple: false, required: true, submitOnChange: true, width: 6
+                input name: "customDevice2AttributeValue", type: "string", title: "On when attribute value change to:", multiple: false, required: true, submitOnChange: true, width: 6
+                input name: "customDevice2Priority", type: "enum", title: "Priority", options: ["low":"Below Modes and Schedules", "medium":"Below Modes, Above Schedules", "high":"Above Modes and Schedules"], defaultValue: "low", required: false, multiple: false, width: 4
+                paragraph "", width: 8
+                input name: "turnOffWithCustomDevice2", type: "bool", title: "Off when the specified attribute of all of the devices changes away from the specific value?", defaultValue: false, submitOnChange: true, width: 5
+                if (turnOffWithCustomDevice2) input name: "turnOffWithCustomDevice2Delay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 7
 			}
 
 			paragraph ""
 			input name: "tempTriggerSensors", type: "capability.temperatureMeasurement", title: "On when outside temperature drops", multiple: true, required: false, refreshAfterSelection: true, submitOnChange: true
 			if (settings.tempTriggerSensors) {
+                input name: "tempTriggerSensorsPriority", type: "enum", title: "Priority", options: ["low":"Below Modes and Schedules", "medium":"Below Modes, Above Schedules", "high":"Above Modes and Schedules"], defaultValue: "low", required: false, multiple: false, width: 4
+                paragraph "", width: 8
                 input name: "onWhenBelowTemp", type: "number", title: "On when at least one sensor falls below this temp", required: true, width: 6
                 input name: "offWhenAboveTemp", type: "number", title: "Off when all sensors rise above this temp", required: true, width: 6
 			}
@@ -166,15 +210,19 @@ def setupApp() {
             paragraph ""
 			input name: "accelerationSensors", type: "capability.accelerationSensor", title: "On when any of these things move", multiple: true, required: false, refreshAfterSelection: true, submitOnChange: true
 			if (accelerationSensors) {
+                input name: "accelerationSensorsPriority", type: "enum", title: "Priority", options: ["low":"Below Modes and Schedules", "medium":"Below Modes, Above Schedules", "high":"Above Modes and Schedules"], defaultValue: "low", required: false, multiple: false, width: 4
+                paragraph "", width: 8
 				input name: "turnOffWhenStopsMoving", type: "bool", title: "Off when all stop moving?",  defaultValue: false
-                if (turnOffWhenStopsMoving) input name: "turnOffWhenStopsMovingDelay", type: "number", title: "How long of a delay, if any, until turning off recirculator after all stop moving (minutes)?", required: true, defaultValue: 0
+                if (turnOffWhenStopsMoving) input name: "turnOffWhenStopsMovingDelay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0
             }
 
 			paragraph ""
 			input name: "flumeDevice", type: "device.FlumeDevice", title: "On when Flume Device Detects Flow", multiple: false, required: false, refreshAfterSelection: true, submitOnChange: true
 			if (settings.flumeDevice) {
-				input name: "turnOffWhenFlowStops", type: "bool", title: "Off when flow stops?", defaultValue: false, submitOnChange: true
-                if (turnOffWhenFlowStops) input name: "turnOffWhenFlowStopsDelay", type: "number", title: "How long of a delay, if any, until turning off recirculator after flow stops(minutes)?", required: true, defaultValue: 0, multiple: false
+                input name: "flumePriority", type: "enum", title: "Priority", options: ["low":"Below Modes and Schedules", "medium":"Below Modes, Above Schedules", "high":"Above Modes and Schedules"], defaultValue: "low", required: false, multiple: false, width: 4
+                paragraph "", width: 8
+				input name: "turnOffWhenFlowStops", type: "bool", title: "Off when flow stops?", defaultValue: false, submitOnChange: true, width: 5
+                if (turnOffWhenFlowStops) input name: "turnOffWhenFlowStopsDelay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 7
 			}
 
             paragraph getInterface("subHeader", " Dynamic Trigger Settings")
@@ -187,7 +235,7 @@ def setupApp() {
         section() {
             
             paragraph getInterface("header", " Water Temperature Control")
-            paragraph getInterface("note", " Some recirculation systems automatically turn on/off as needed to maintain water temperature between temperature setpoints. If your recriculation system does not do this automatically, you can use the controls below to do it via Hubitat.")
+            paragraph getInterface("note", " When set to recirculate, some recirculation systems automatically turn on/off as needed to keep the water hot without needlessly staying on continuously. If your recriculation system does not do this automatically, you can use the controls below to do it via Hubitat. Be sure to set parameters in a way that will avoid ping-pong of on/off state.")
             input name: "waterTempControlType", type: "enum", options: ["singleValue" : "Value of single temp sensor", "differenceValue" : "Temp Sensor 2 - Temp Sensor 1"], title: "Control Based On...", required: false
             if (waterTempControlType == "singleValue") {
                 input name: "waterTempSensor1", type: "capability.temperatureMeasurement", title: (waterTempControlType == "singleValue") ? "Water Temperature Sensor" : "Water Temperature Sensor 1", multiple: false, required: false
@@ -237,6 +285,7 @@ def schedulePage() {
                     input(name:"schedule${j}StopMonth", type:"enum", options:months, title: "Stop Month", required: true, width: 2)
                     input(name:"schedule${j}StopDay", type:"enum", options:getNumDaysInMonth(settings["schedule{j}StopMonth"]), title: "Stop Day", required: true, width: 2)
                     input name:"schedule${j}DaysOfWeek", type: "enum", title: "Schedule Days of Week", options: daysOfWeekList, multiple: true, required: true, width: 4
+                    input name:"schedule${j}DeprioritizedModes", type: "mode", title: "Prioritize Schedule Over These Modes...", options: location?.getModes(), multiple: true, required: false, width: 12
                     
                     displayPeriodTable(j)
                     
@@ -248,6 +297,7 @@ def schedulePage() {
                         if (state.initializeAddPeriod) app.updateSetting("addPeriodEnd",[type:"time",value: midnight]) 
                         input name: "confirmPeriodToAdd", type: "button", title: "Add", width: 2
                         input name: "cancelPeriodToAdd", type: "button", title: "Cancel", width: 2
+                        paragraph getInterface("note", " Period must start and end on the same day, with the start time occurring before the end time.")
                         state.initializeAddPeriod = false
                     }
                     else if (state.editingPeriod != null) {
@@ -261,6 +311,7 @@ def schedulePage() {
                             if (state.initializeEditing && periodMap.end) app.updateSetting("editPeriodEnd",[type:"time",value: periodMap.end]) 
                             input name: "confirmPeriodToEdit", type: "button", title: "Save", width: 2
                             input name: "cancelPeriodToEdit", type: "button", title: "Cancel", width: 2    
+                            paragraph getInterface("note", " Period must start and end on the same day, with the start time occurring before the end time.")
                             state.initializeEditing = false     
                         }              
                     }
@@ -462,6 +513,20 @@ def getSchedulesDescription() {
     return description
 }
 
+def getEnumOptions(settingObject) {
+    def options = []
+    settingObject.each { dev ->
+        def attributes = dev.getSupportedAttributes()
+        logDebug("Attributes: " + attributes, "Debug")
+        attributes.each { att ->
+            logDebug("Attribute Name: " + att.name + " indexOf = " + options.indexOf(att.name), "Debug")
+            if (options.indexOf(att.name) == -1) options.add(att.name)
+        }
+    }
+    logDebug("Enum Options: " + options, "Debug")    
+    return options
+}
+
 def installed() {
 	logDebug("Installed with settings: ${settings}", "Debug")
 
@@ -484,15 +549,17 @@ def initialize() {
     
 	if (offModes || onModes) subscribe(location, "mode", locationModeHandler)
 
-    if (state.scheduleMap) scheduleSchedules()
-
-    initializeRecirculatorState()
+    if (state.scheduleMap) {
+        scheduleSchedules(false, true) // schedule start/end of any period applicable for today
+        schedule("00 59 23 ? * *", scheduleSchedules) // at end of each day, schedule any applicable periods for the next day
+    } 
 
     setRecirculatorOnOffOnInitialize()
 
     updateTriggerSubscriptionsAndDelayedEvents()
 
-    updateWaterTempSensorSubscriptions()
+    if (isRecirculatorOn()) subscribeWaterTempSensors()
+    else unsubscribeWaterTempSensors()
 
     initializeDebugLogging()
 }
@@ -537,6 +604,14 @@ def subscribeDynamicTriggers() {
     if (onSwitches) {
         subscribe(onSwitches, "switch.on", handleTriggerOnEvent)
         if (turnOffWithSwitches) subscribe(onSwitches, "switch.off", handleOnSwitchOff)
+    }
+
+    if (customDevices1 && customDevice1Attributes) {
+        subscribe(customDevices1, customDevice1Attributes, handleCustomDevices1)
+    }
+
+    if (customDevices2 && customDevice2Attributes) {
+        subscribe(customDevices2, customDevice2Attributes, handleCustomDevices2)
     }
 
     if (tempTriggerSensors) {
@@ -586,6 +661,14 @@ def unsubscribeDynamicTriggers() {
         if (turnOffWithSwitches) unsubscribe(onSwitches, "switch.off")
     }
 
+    if (customDevices1 && customDevice1Attributes) {
+        unsubscribe(customDevices1, customDevice1Attributes)
+    }
+
+    if (customDevices2 && customDevice2Attributes) {
+        unsubscribe(customDevices2, customDevice2Attributes)
+    }
+
     if (tempTriggerSensors) {
         unsubscribe(tempTriggerSensors, "temperature")
     }
@@ -602,21 +685,88 @@ def unsubscribeDynamicTriggers() {
 }
 
 def setRecirculatorOnOffOnInitialize() {
-    if (inAnySpecifiedMode()) updateFromMode()
+    def prioritizedScheduleId = getSchedulePrioritizedOverCurrentMode()
+    if (prioritizedScheduleId != -1) updateFromPrioritizedSchedule(prioritizedScheduleId)
+    else if (inAnySpecifiedMode()) updateFromMode()
     else if (inAnyScheduledTimePeriod()) updateFromScheduledTimePeriod()
     else updateFromTriggerState()
 }
 
 def updateTriggerSubscriptionsAndDelayedEvents() {
-    if (!inAnySpecifiedMode() && !inAnyScheduledTimePeriod()) subscribeDynamicTriggers()
+    def isModeActive = inAnySpecifiedMode()
+    def isSchedActive = inAnyScheduledTimePeriod()
+
+    if (!isModeActive && !isSchedActive) subscribeDynamicTriggers()
     else {
         unsubscribeDynamicTriggers()
         cancelDelayedTriggerEvents()
     }
+    
+/*
+    if (motionSensors) {        
+        if (motionSensorsPriority == "high" || (motionSensorsPriority == "medium" && !isModeActive) || (!isModeActive && !isSchedActive)) { 
+            subscribe(motionSensors, "motion.active", handleTriggerOnEvent)
+            if (turnOffWhenMotionStops) subscribe(motionSensors, "motion.inactive", handleMotionOff)
+        }
+        else {
+            unsubscribe(motionSensors, "motion.active")
+            if (turnOffWhenMotionStops) unsubscribe(motionSensors, "motion.inactive")
+        }
+    }
+*/
+/*
+    if (arrivePresenceSensors) {
+        subscribe(arrivePresenceSensors, "presence.present", handleTriggerOnEvent)
+        if (turnOffWhenAllNotPresent) subscribe(arrivePresenceSensors, "presence.notPresent", handleArrivePresenceOff)
+    }
+
+    if (departPresenceSensors) {
+        subscribe(departPresenceSensors, "presence.notPresent", handleTriggerOnEvent)
+        if (turnOffWhenAllPresent) subscribe(departPresenceSensors, "presence.present", handleDepartPresenceOff)
+    }
+
+    if (openContactSensors) {
+        subscribe(openContactSensors, "contact.open", handleTriggerOnEvent)
+        if (turnOffWhenReclose) subscribe(openContactSensors, "contact.closed", handleOpenContacteOff)
+    }
+
+    if (closeContactSensors) {
+        subscribe(closeContactSensors, "contact.closed", handleTriggerOnEvent)
+        if (turnOffWhenReopen) subscribe(closeContactSensors, "contact.open", handleCloseContactOff)
+    }
+
+    if (onSwitches) {
+        subscribe(onSwitches, "switch.on", handleTriggerOnEvent)
+        if (turnOffWithSwitches) subscribe(onSwitches, "switch.off", handleOnSwitchOff)
+    }
+
+    if (customDevices1 && customDevice1Attributes) {
+        subscribe(customDevices1, customDevice1Attributes, handleCustomDevices1)
+    }
+
+    if (customDevices2 && customDevice2Attributes) {
+        subscribe(customDevices2, customDevice2Attributes, handleCustomDevices2)
+    }
+
+    if (tempTriggerSensors) {
+        subscribe(tempTriggerSensors, "temperature", triggerTempHandler)
+    }
+
+    if (accelerationSensors) {
+        subscribe(accelerationSensors, "acceleration.active", handleTriggerOnEvent)
+        if (turnOffWhenStopsMoving) subscribe(accelerationSensors, "acceleration.inactive", handleAccelerationOff)
+    }
+
+    if (flumeDevice) {
+        subscribe(flumeDevice, "flowStatus.running", handleTriggerOnEvent)
+        if (turnOffWhenFlowStops) subscribe(flumeDevice, "flowStatus.stopped", handleFlumeOff)
+    }
+    */
 }
 
 def cancelDelayedTriggerEvents() {
     unschedule("delayedOffHandler")
+    state.pendingDelayedOffTriggers = []
     unschedule("updateFromTriggerState")
     unschedule("handleTriggerOnMaxDurationReached")
 }
@@ -635,70 +785,62 @@ def unsubscribeWaterTempSensors() {
     unsubscribe(waterTempSensor2, "temperature")
 }
 
-def updateWaterTempSensorSubscriptions() {
-    if (isRecirculatorStateOn()) subscribeWaterTempSensors()
-    else unsubscribeWaterTempSensors()
-}
-
-def scheduleSchedules() {
+def scheduleSchedules(onlyTomorrow = true, onlyToday = false) {
+    def now = new Date()
     for (j in state.scheduleMap.keySet()) {
-        
-        def shortDays = settings["schedule${j}DaysOfWeek"]
-        for (i=0; i<shortDays.size(); i++) {
-            shortDays[i] = daysOfWeekShortMap[shortDays[i]]
-        }
-        def daysOfWeekChron = shortDays.join(",")
-        logDebug("Scheduling schedule ${settings["schedule${j}Name"]} for ${settings["schedule${j}DaysOfWeek"]}", "Debug")
-        // schedule update for beginning and end of each time window, on selected days of the week, but irrespective of dates. When triggered, will check if current day is within the date window at that time and ignore if not
-        state.scheduleMap[(j)].eachWithIndex { item, index ->
-            def start = toDateTime(item?.start)
-            def startHour = start.format("H")
-            def startMin = start.format("m")
-            def startChron = "0 ${startMin} ${startHour} ? * ${daysOfWeekChron}"
-            schedule(startChron, handlePeriodStart, [data: [scheduleId: j, periodId: index], overwrite: false])
-            logDebug("Scheduled start of period ${index} for schedule " +  settings["schedule${j}Name"] + " with chron string ${startChron}", "Debug")
-
-            def end = toDateTime(item?.end)
-            def endHour = end.format("H")
-            def endMin = end.format("m")
-            def endChron = "0 ${endMin} ${endHour} ? * ${daysOfWeekChron}"
-            schedule(endChron, handlePeriodStop, [data: [scheduleId: j, periodId: index], overwrite: false])
-            logDebug("Scheduled end of period ${index} for schedule " +  settings["schedule${j}Name"] + " with chron string ${endChron}", "Debug")
-        }
-    }
-}
-
-def controlPhysicalRecirc() {
-    if (state.recirculatorState == "on") {
-        if (waterTempControlType != null) {
-            initializeRecirculatorSubState()
-            updateRecirculatorSubState()
-        }
-        else {
-            if (settings["simulationEnable"]) {
-                simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On")
+        if ((onlyTomorrow == false && onlyToday == false) || (onlyTomorrow == true && isTomorrowWithinScheduleDates(j) && isTomorrowScheduledDayofWeek(j)) || (onlyToday == true && isTodayWithinScheduleDates(j) && isScheduledDayofWeek(j))) {
+            def shortDays = settings["schedule${j}DaysOfWeek"]
+            for (i=0; i<shortDays.size(); i++) {
+                shortDays[i] = daysOfWeekShortMap[shortDays[i]]
             }
-            else {
-                if (recircSensedState == null || recircSensedState.currentSwitch != "on") {
-                    recircRelay.on()
-                    if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
-                    notificationDevices?.deviceNotification("Recirculator On")
+            def daysOfWeekChron = shortDays.join(",")
+        //  logDebug("Scheduling schedule ${settings["schedule${j}Name"]} for ${settings["schedule${j}DaysOfWeek"]}", "Debug")
+            // schedule update for beginning and end of each time window, on selected days of the week, but irrespective of dates. When triggered, will check if current day is within the date window at that time and ignore if not
+            state.scheduleMap[(j)].eachWithIndex { item, index ->
+                def start = toDateTime(item?.start)
+                if (onlyToday) {
+                    def startToday = getTodayAtSameTime(start) // schedule tomorrow, rather than today, so that accounts for possibility of schedule starting at midnight
+                    if (startToday.after(now)) {
+                        runOnce(startToday, handlePeriodStart, [data: [scheduleId: j, periodId: index], overwrite: false])
+                        logDebug("Scheduled start of period ${index} for schedule " +  settings["schedule${j}Name"] + " for " + startToday, "Debug")
+                    }
+                    else logDebug("Start of period ${index} for schedule " +  settings["schedule${j}Name"] + " has already happened today. Nothing to schedule.", "Debug")
                 }
-                else logDebug("Recirculator called to turn on, but already on. Nothing to do.", "Debug")
+                else if (onlyTomorrow) {
+                    def startTomorrow = getTomorrowAtSameTime(start) // schedule tomorrow, rather than today, so that accounts for possibility of schedule starting at midnight
+                    runOnce(startTomorrow, handlePeriodStart, [data: [scheduleId: j, periodId: index], overwrite: false])
+                    logDebug("Scheduled start of period ${index} for schedule " +  settings["schedule${j}Name"] + " for " + startTomorrow, "Debug")
+                }
+                else {
+                    def startHour = start.format("H")
+                    def startMin = start.format("m")
+                    def startChron = "0 ${startMin} ${startHour} ? * ${daysOfWeekChron}"
+                    runOnce(startChron, handlePeriodStart, [data: [scheduleId: j, periodId: index], overwrite: false])
+                    logDebug("Scheduled start of period ${index} for schedule " +  settings["schedule${j}Name"] + " with chron string " + startChron, "Debug")
+                }
+            
+                def end = toDateTime(item?.end)
+                if (onlyToday) {
+                    def endToday = getTodayAtSameTime(end)
+                    if (endToday.after(now)) {
+                        runOnce(endToday, handlePeriodStop, [data: [scheduleId: j, periodId: index], overwrite: false])
+                        logDebug("Scheduled start of period ${index} for schedule " +  settings["schedule${j}Name"] + " for " + endToday, "Debug")
+                    }
+                    else logDebug("End of period ${index} for schedule " +  settings["schedule${j}Name"] + " has already happened today. Nothing to schedule.", "Debug")
+                }
+                else if (onlyTomorrow) {
+                    def endTomorrow = getTomorrowAtSameTime(end)
+                    runOnce(endTomorrow, handlePeriodStop, [data: [scheduleId: j, periodId: index], overwrite: false])
+                    logDebug("Scheduled start of period ${index} for schedule " +  settings["schedule${j}Name"] + " for " + endTomorrow, "Debug")
+                }
+                else {
+                    def endHour = end.format("H")
+                    def endMin = end.format("m")
+                    def endChron = "0 ${endMin} ${endHour} ? * ${daysOfWeekChron}"
+                    schedule(endChron, handlePeriodStop, [data: [scheduleId: j, periodId: index], overwrite: false])
+                    logDebug("Scheduled end of period ${index} for schedule " +  settings["schedule${j}Name"] + " with chron string " + endChron, "Debug")
+                }  
             }
-        }
-    }
-    else if (state.recirculatorState == "off") {
-        if (settings["simulationEnable"]) {
-            simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off")
-        }
-        else {
-            if (recircSensedState == null || recircSensedState.currentSwitch != "off") {
-                recircRelay.on()
-                if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
-                notificationDevices?.deviceNotification("Recirculator Off")
-            }
-            else logDebug("Recirculator called to turn off, but already off. Nothing to do.", "Debug")
         }
     }
 }
@@ -708,115 +850,103 @@ def makeRelayMomentary() {
 }
 
 def waterTempHandler(evt) {
-    updateRecirculatorSubState()
-}
-
-def cycleRelayWithSubState() {
-    if (state.recirculatorSubState == "on") {
-        if (settings["simulationEnable"]) {
-            simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On Cycle Until Come Up To Temp")
-        }
+    def substate = getRecirculatorSubState()
+    if (substate == "on" && !isRecirculatorOn()) {
+        if (settings["simulationEnable"]) simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On Cycle Until Come Up To Temp")
         else {
-            if (recircSensedState == null || recircSensedState.currentSwitch != "on") {
-                recircRelay.on()
-                if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
-                notificationDevices?.deviceNotification("Recirculator On Cycle Until Come Up To Temp")
-            }
-            else logDebug("Recirculator called to turn on for a cycle based on water temp, but already on. Nothing to do.", "Debug")
+            recircRelay.on()
+            if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+            notificationDevices?.deviceNotification("Recirculator On Cycle Until Come Up To Temp")
         }
     }
-    else if (state.recirculatorSubState == "off") {
-        if (settings["simulationEnable"]) {
-            simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off Cycle While Up To Temp")
-        }
+    else if (substate == "off" && !isRecirculatorOff()) {
+        if (settings["simulationEnable"]) simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off Cycle While Up To Temp")
         else {
-            if (recircSensedState == null || recircSensedState.currentSwitch != "off") {
-                recircRelay.on()
-                if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
-                notificationDevices?.deviceNotification("Recirculator Off Cycle While Up To Temp")
-            }
-            else logDebug("Recirculator called to turn off for a cycle based on water temp, but already off. Nothing to do.", "Debug")
+            recircRelay.on()
+            if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+            notificationDevices?.deviceNotification("Recirculator Off Cycle While Up To Temp")
         }
     }
 }
 
-def initializeRecirculatorSubState() {
-    state.recirculatorSubState = null
-    state.coolDownWaterTemp = null
-}
-
-def updateRecirculatorSubState() {
-    def oldSubState = state.recirculatorSubState
+def getRecirculatorSubState() {
+    def subState = null
     if (waterTempControlType == "singleValue" && settings["waterTempSensor1"] && settings["turnOffTemp"] && settings["turnOnTemp"]) {
         def temp = settings["waterTempSensor1"].latestValue("temperature")
         if (temp >= settings["turnOffTemp"]) {
-            state.recirculatorSubState = "off"
+            subState = "off"
             state.coolDownWaterTemp = true
         }
         else if (temp < settings["turnOffTemp"] && temp > settings["turnOnTemp"]) {
-            if (state.coolDownWaterTemp == null || !state.coolDownWaterTemp) state.recirculatorSubState = "on" // haven't reached turn off temp yet
-            else if (state.coolDownWaterTemp == true) state.recirculatorSubState = "off" // have reached turn off temp and need to cool down
+            if (state.coolDownWaterTemp == null || !state.coolDownWaterTemp) subState = "on" // haven't reached turn off temp yet
+            else if (state.coolDownWaterTemp == true) subState = "off" // have reached turn off temp and need to cool down
         }
         else if (temp <= settings["turnOnTemp"]) {
-            state.recirculatorSubState = "on"
+            subState = "on"
             state.coolDownWaterTemp = false
         }
     }
     else if (waterTempControlType == "differenceValue" && settings["waterTempSensor1"] && settings["waterTempSensor2"]) {
         def diff = settings["waterTempSensor2"].latestValue("temperature") - settings["waterTempSensor1"].latestValue("temperature")
         if (diff <= settings["turnOffDiffTemp"]) {
-            state.recirculatorSubState = "off"
+            subState = "off"
             state.coolDownWaterTemp = true
         }
         else if (diff > settings["turnOffDiffTemp"] && diff < settings["turnOnDiffTemp"]) {
-            if (state.coolDownWaterTemp == null || !state.coolDownWaterTemp) state.recirculatorSubState = "on" // haven't reached turn off temp diff yet
-            else if (state.coolDownWaterTemp == true) state.recirculatorSubState = "off" // have reached turn off diff temp and need to cool down
+            if (state.coolDownWaterTemp == null || !state.coolDownWaterTemp) subState = "on" // haven't reached turn off temp diff yet
+            else if (state.coolDownWaterTemp == true) subState = "off" // have reached turn off diff temp and need to cool down
         }
         else if (diff >= settings["turnOnDiffTemp"]) {
-            state.recirculatorSubState = "on"
+            subState = "on"
             state.coolDownWaterTemp = false
         }        
     }
-    else state.recirculatorSubState = null
-    if (oldSubState != state.recirculatorSubState) cycleRelayWithSubState()
-}
-
-def isRecirculatorStateOn() {
-    return state.recirculatorState == "on"
-}
-
-def isRecirculatorStateOff() {
-    retuirn state.recirculatorState == "off"
+    else subState = null
+    return substate
 }
 
 def turnRecirculatorOn() {
     if (!isRecirculatorOn()) {
-        state.recirculatorState = "on"
-        logDebug("Set recirculator State to on.", "Debug")
-        controlPhysicalRecirc()
-        updateWaterTempSensorSubscriptions()
+        def substate = null
+        if (waterTempControlType != null) {
+            state.coolDownWaterTemp = null
+            substate = getRecirculatorSubState()
+        }
+        if (substate == null || substate == "on") {
+            if (settings["simulationEnable"]) {
+                simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On" + substate == "on" ? " Until Come Up To Temp." : "")
+            }
+            else {
+                recircRelay.on()
+                if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+                notificationDevices?.deviceNotification("Recirculator On" + substate == "on" ? " Until Come Up To Temp." : "")
+            }
+        }
+        else if (substate == "off") logDebug("Recirculator called to turn on, but already up to temp. Will turn on when needed to reach temp.", "Debug")
+        subscribeWaterTempSensors()
     }
     else {
-        logDebug("Recirculator called to turn on, but state indicates already on. Nothing to do.", "Debug")
+        logDebug("Recirculator called to turn on, but it is already on. Nothing to do.", "Debug")
     }
 }
 
 def turnRecirculatorOff() {
     if (!isRecirculatorOff()) {
-        state.recirculatorState = "off"
         state.onPeriodLastEndedAt = (new Date()).getTime()
         cancelDelayedTriggerEvents()
         logDebug("Set recirculator State to off and unscheduled all delayedOffHandlers.", "Debug")
-        controlPhysicalRecirc()
-        updateWaterTempSensorSubscriptions()
+        if (settings["simulationEnable"]) {
+            simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off")
+        }
+        else {
+            recircRelay.on()
+            if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+            notificationDevices?.deviceNotification("Recirculator Off")
+        }
+        unsubscribeWaterTempSensors()
     } else {
-        logDebug("Recirculator called to turn off, but state indicates already off. Nothing to do.", "Debug")
+        logDebug("Recirculator called to turn off, but it is already off. Nothing to do.", "Debug")
     }
-}
-
-def initializeRecirculatorState() {
-    if (recircSensedState != null) state.recirculatorState = recircSensedState.currentSwitch
-    else state.recirculatorState = recircRelay.currentSwitch
 }
 
 def manualOnHandler(evt) {     
@@ -841,7 +971,12 @@ def manualOnHandler(evt) {
 
 def manualOnTimeout() {
     state.lastManualOnTime = null
-    turnRecirculatorOff()
+    def prioritizedScheduleId = getSchedulePrioritizedOverCurrentMode()
+    if (prioritizedScheduleId != -1) updateFromPrioritizedSchedule(prioritizedScheduleId)
+    else if (onModes && evt.value in onModes) turnRecirculatorOn()
+    else if (inAnyScheduledTimePeriod()) updateFromScheduledTimePeriod()
+    else turnRecirculatorOff()
+    updateTriggerSubscriptionsAndDelayedEvents()
     logDebug("Max duration reached for manually turned on recirculator. Turned off.", "Debug")
 }
 
@@ -854,11 +989,13 @@ def manualOffHandler(evt) {
 }
 
 def isRecirculatorOn() {
-    return state.recirculatorState == "on"
+    if (recircSensedState != null) return recircSensedState.currentSwitch == "on"
+    else return recircRelay.currentSwitch == "on"
 }
 
 def isRecirculatorOff() {
-    return state.recirculatorState == "off"
+    if (recircSensedState != null) return recircSensedState.currentSwitch == "off"
+    else return recircRelay.currentSwitch == "off"
 }
 
 def delayedModeOffHandler() {
@@ -878,45 +1015,49 @@ def delayedModeOnHandler() {
 
 def locationModeHandler(evt) {
     logDebug("Handling location mode event ${evt.value}", "Debug")
-	if (onModes) {
-        if (evt.value in onModes) {
-            if (settings["modesTurnOnDelay"] > 0) runIn((settings["modesTurnOnDelay"]*60), delayedModeOnHandler, [overwrite: false])
-            else turnRecirculatorOn()
-		}
+    def anyPrioritizedSchedule = getSchedulePrioritizedOverCurrentMode()
+	if (onModes && evt.value in onModes && anyPrioritizedSchedule == -1) {
+        if (settings["modesTurnOnDelay"] > 0) {
+            logDebug("Detected mode ${evt.value}. Turning on in " + settings["modesTurnOnDelay"] + " minutes", "Debug")
+            runIn((settings["modesTurnOnDelay"]*60), delayedModeOnHandler, [overwrite: false])
+        }
+        else turnRecirculatorOn()
     }
-	if (offModes) {
-        if (evt.value in offModes) {
-            if (settings["modesTurnOffDelay"] > 0) runIn((settings["modesTurnOffDelay"]*60), delayedModeOffHandler, [overwrite: false])
-            else turnRecirculatorOff()
-		}
+	else if (offModes && evt.value in offModes && anyPrioritizedSchedule == -1) {
+        if (settings["modesTurnOffDelay"] > 0) {
+            logDebug("Detected mode ${evt.value}. Turning off in " + settings["modesTurnOffDelay"] + " minutes", "Debug")
+            runIn((settings["modesTurnOffDelay"]*60), delayedModeOffHandler, [overwrite: false])
+        }
+        else turnRecirculatorOff()
     }
+    else updateFromScheduledTimePeriod() // in case mode changed after a time period has already started
     updateTriggerSubscriptionsAndDelayedEvents()
 }
 
 def updateFromMode() {
-    if (settings["offModes"] && location?.currentMode in settings["offModes"]) turnRecirculatorOff()
-    else if (settings["onModes"] && location?.currentMode in settings["onModes"]) turnRecirculatorOn()
+    logDebug("Updating recirculator based on mode.", "Debug")
+    if (settings["offModes"] && location?.getMode() in settings["offModes"]) turnRecirculatorOff()
+    else if (settings["onModes"] && location?.getMode() in settings["onModes"]) turnRecirculatorOn()
 }
 
 Boolean doesModeAllowRecirculatorOn() {
     def answer = true
-    if (settings["offModes"] && location?.currentMode in settings["offModes"]) answer = false
+    if (settings["offModes"] && location?.getMode() in settings["offModes"]) answer = false
     return answer
 }
 
 Boolean doesModeAllowRecirculatorOff() {
     def answer = true
-    if (settings["onModes"] && location?.currentMode in settings["onModes"]) answer = false
+    if (settings["onModes"] && location?.getMode() in settings["onModes"]) answer = false
     return answer
 }
 
 Boolean inAnySpecifiedMode() {
     def answer = false
-    if (settings["onModes"] && location?.currentMode in settings["onModes"]) answer = true
-    if (settings["offModes"] && location?.currentMode in settings["offModes"]) answer = true
+    if (settings["onModes"] && location?.getMode() in settings["onModes"]) answer = true
+    if (settings["offModes"] && location?.getMode() in settings["offModes"]) answer = true
     return answer
 }
-
 
 // SCHEDULES
 def updateFromScheduledTimePeriod() {
@@ -945,12 +1086,39 @@ def updateFromScheduledTimePeriod() {
     }
 }
 
+def updateFromPrioritizedSchedule(scheduleId) {
+    logDebug("Updating Recirculator State From Time Period In " + settings["schedule${scheduleId}Name"] + " That is Prioritized Over the Current Mode.", "Debug")
+    def foundMatch = false
+    state.scheduleMap[(scheduleId)].eachWithIndex { item, index ->
+        if (isTimeOfDayWithinPeriod(scheduleId, index)) {
+            if (state.scheduleMap[(scheduleId)][index].state == "on") {
+                logDebug("Recirculator scheduled to be on. Turning on.", "Debug")
+                turnRecirculatorOn()
+            }
+            else if (state.scheduleMap[(scheduleId)][index].state == "off") {
+                turnRecirculatorOff()
+                logDebug("Recirculator scheduled to be off. Turning off.", "Debug")
+            }
+            if (foundMatch == false) foundMatch = true
+            else if (foundMatch == true) logDebug("Multiple overlapping time periods. Setting recirculator to state of first matching time period.", "Warning")
+        }
+    }    
+}
+
 def handlePeriodStart(data) {
     
     def scheduleId = data.scheduleId
     def periodId = data.periodId as Integer
 
+    def isSchedulePrioritized = isSchedulePrioritizedOverCurrentMode(scheduleId)
+    def inAnyScheduledTimePeriod = inAnyScheduledTimePeriod(scheduleId)
+
     logDebug("Handling Start of Period " + periodId + " for schedule " + settings["schedule${scheduleId}Name"], "Debug")
+
+    if (inAnySpecifiedMode() && (!isSchedulePrioritized || (isSchedulePrioritized && !inAnyScheduledTimePeriod))) {
+        logDebug("Hub is in a mode (${location?.getMode()}) that already dictates recirculator state. Nothing more to do at start of period.", "Debug")
+        return
+    }
 
     if (!isTodayWithinScheduleDates(scheduleId)) return // schedule not applicable to today's date
     if (!isScheduledDayofWeek(scheduleId)) return // schedule not applicable to today's day of the week
@@ -959,7 +1127,7 @@ def handlePeriodStart(data) {
     if (state.scheduleMap[(scheduleId)] && state.scheduleMap[(scheduleId)][periodId] && state.scheduleMap[(scheduleId)][periodId].state == "on") {
         // turn recirculator on unless Hubitat mode dictates that the recirculator be off, no matter dynamic triggers (prioritizes time schedule over dynamic triggers)
         if (!isRecirculatorOn()) {
-            if (doesModeAllowRecirculatorOn()) turnRecirculatorOn()
+            if (doesModeAllowRecirculatorOn() || isSchedulePrioritized) turnRecirculatorOn()
             else logDebug("Recirculator is scheduled to turn on now, but mode does not allow it to be turned on. Nothing to do.", "Debug")
         }
         else logDebug("Recirculator is scheduled to turn on now, but recirculator is already on. Nothing to do.", "Debug")
@@ -967,7 +1135,7 @@ def handlePeriodStart(data) {
     else if (state.scheduleMap[(scheduleId)] && state.scheduleMap[(scheduleId)][periodId] && state.scheduleMap[(scheduleId)][periodId].state == "off") {
         // turn recirculator off unless Hubitat mode dictates that the recirculator be on, no matter dynamic triggers (prioritizes time schedule over dynamic triggers)
         if (!isRecirculatorOff()) {
-            if (doesModeAllowRecirculatorOff()) turnRecirculatorOff()
+            if (doesModeAllowRecirculatorOff() || isSchedulePrioritized) turnRecirculatorOff()
             else logDebug("Recirculator is scheduled to turn off now, but mode does not allow it to be turned off. Nothing to do.", "Debug")
         }
         else logDebug("Recirculator is scheduled to turn off now, but recirculator is already off. Nothing to do.", "Debug")
@@ -979,6 +1147,11 @@ def handlePeriodStart(data) {
 def handlePeriodStop(data) {
     def scheduleId = data.scheduleId
     def periodId = data.periodId as Integer
+
+    if (inAnySpecifiedMode()) {
+        logDebug("Hub is in a mode (${location?.getMode()}) that already dictates recirculator state. Nothing more to do at end of period.", "Debug")
+        return
+    }
 
     logDebug("Handling End of Period " + periodId + " for schedule " + settings["schedule${scheduleId}Name"], "Debug")
 
@@ -997,7 +1170,7 @@ def isTimeOfDayWithinPeriod(scheduleId, periodId) {
     def endReference = toDateTime(state.scheduleMap[(scheduleId)][periodId].end)
     def end = getTodayAtSameTime(endReference)
     if (start && end && timeOfDayIsBetween(start, end, new Date(), location.timeZone)) answer = true
-    logDebug("Schedule " + settings["schedule${scheduleId}Name"] + " Period ${periodId} starts at ${start} and ends at ${end}. Current time between start and end? ${answer}", "Debug")
+ //   logDebug("Schedule " + settings["schedule${scheduleId}Name"] + " Period ${periodId} starts at ${start} and ends at ${end}. Current time between start and end? ${answer}", "Debug")
     return answer
 }
 
@@ -1010,7 +1183,7 @@ Boolean doSchedulesAllowRecirculatorState(onOrOffState) {
         for (j in state.scheduleMap.keySet()) {
             if (isTodayWithinScheduleDates(j) && isScheduledDayofWeek(j)) {
                 // schedule applicable to today
-                logDebug("Schedule " + settings["schedule${j}Name"] + " applicable to today. Checking Time Periods.", "Debug")
+             //   logDebug("Schedule " + settings["schedule${j}Name"] + " applicable to today. Checking Time Periods.", "Debug")
                 state.scheduleMap[(j)].eachWithIndex { item, index ->
                     // check if time periods of schedule allow for recirculator to be on right now
                     if (isTimeOfDayWithinPeriod(j, index)) {
@@ -1027,22 +1200,63 @@ Boolean doSchedulesAllowRecirculatorState(onOrOffState) {
     return answer
 }
 
+Boolean isSchedulePrioritizedOverCurrentMode(scheduleId) {
+    def answer = false
+    if (settings["schedule${scheduleId}DeprioritizedModes"] && location?.getMode() in settings["schedule${scheduleId}DeprioritizedModes"]) answer = true
+    logDebug("schedule${scheduleId}DeprioritizedModes = " + settings["schedule${scheduleId}DeprioritizedModes"] + "location?.getMode() = " + location?.getMode() + " answer = " + location?.getMode() in settings["schedule${scheduleId}DeprioritizedModes"], "Debug")
+    return answer
+}
+
+def getSchedulePrioritizedOverCurrentMode() {
+    def prioritizedScheduleIndex = -1
+    if (state.scheduleMap) {
+        for (j in state.scheduleMap.keySet()) {
+            if (isTodayWithinScheduleDates(j) && isScheduledDayofWeek(j) && isSchedulePrioritizedOverCurrentMode(j)) {
+                // schedule applicable to today and is prioritized over current mode
+                state.scheduleMap[(j)].eachWithIndex { item, index ->
+                    if (isTimeOfDayWithinPeriod(j, index)) {
+                        logDebug("Schedule " + settings["schedule${j}Name"] + " has an active period and is prioritized over the current mode.", "Debug")
+                        if (prioritizedScheduleIndex == -1) prioritizedScheduleIndex = j
+                        else logDebug("Schedule " + settings["schedule${j}Name"] + " has an active period and is prioritized over the current mode, but there are multiple prioritized schedules/periods that are active. Ignoring this one.", "Debug")
+                    }
+                }
+            }
+        }
+    }    
+    if (prioritizedScheduleIndex == -1) logDebug("No Schedules with an active period found to be prioritized over the current mode.", "Debug")
+    return prioritizedScheduleIndex
+}
+
 Boolean inAnyScheduledTimePeriod() {
+    logDebug("inAnyScheduledTimePeriod()...Checking if any scheduled time period active.", "Trace")
     def answer = false
     if (state.scheduleMap) {
         for (j in state.scheduleMap.keySet()) {
             if (isTodayWithinScheduleDates(j) && isScheduledDayofWeek(j)) {
                 // schedule applicable to today
-                state.scheduleMap[(j)].eachWithIndex { item, index ->
-                    if (isTimeOfDayWithinPeriod(j, index)) {
-                        answer = true
-                        logDebug("Currently in Period ${index} for schedule " + settings["schedule${j}Name"], "Debug")
-                        return answer
-                    }
-                    else logDebug("Currently not in Period ${index} for schedule " + settings["schedule${j}Name"], "Debug")
+                logDebug("Schedule " + settings["schedule${j}Name"] + " applicable to today.", "Debug")
+                if (inAnyScheduledTimePeriod(j)) {
+                    answer = true
+                    logDebug("Found active time period for schedule " + settings["schedule${j}Name"] + ".", "Debug")
                 }
+                else logDebug("No active time period for schedule " + settings["schedule${j}Name"] + ".", "Debug")
             }
             else logDebug("Schedule " + settings["schedule${j}Name"] + " not applicable to today. Skipping time period checks.", "Debug")
+        }
+    }
+    return answer    
+}
+
+Boolean inAnyScheduledTimePeriod(scheduleId) {
+    def answer = false
+    if (state.scheduleMap) {
+        state.scheduleMap[(scheduleId)].eachWithIndex { item, index ->
+            if (isTimeOfDayWithinPeriod(scheduleId, index)) {
+                answer = true
+                logDebug("Currently in Period ${index} for schedule " + settings["schedule${scheduleId}Name"], "Debug")
+                return answer
+            }
+            else logDebug("Currently not in Period ${index} for schedule " + settings["schedule${scheduleId}Name"], "Debug")
         }
     }
     return answer    
@@ -1053,8 +1267,18 @@ def getTodayAtSameTime(timeReferenceDate) {
     def timeMap = getTimeMapFromDateTime(timeReferenceDate)
     def atHour = timeMap.hour
     def atMinutes = timeMap.minutes
-    Date todayAtTime = today.copyWith(hourOfDay: atHour, minute: atMinutes, seconds: 0)
+    Date todayAtTime = today.copyWith(hourOfDay: atHour, minute: atMinutes, second: 0)
     return todayAtTime
+}
+
+def getTomorrowAtSameTime(timeReferenceDate) {
+    Date today = new Date()
+    Date tomorrow = today + 1
+    def timeMap = getTimeMapFromDateTime(timeReferenceDate)
+    def atHour = timeMap.hour
+    def atMinutes = timeMap.minutes
+    Date tomorrowAtTime = tomorrow.copyWith(hourOfDay: atHour, minute: atMinutes, second: 0)
+    return tomorrowAtTime
 }
 
 def getTimeMapFromDateTime(dateTime) {
@@ -1107,6 +1331,48 @@ def isTodayWithinScheduleDates(scheduleId) {
     return withinDates
 }
 
+def isTomorrowWithinScheduleDates(scheduleId) {
+    def withinDates = false
+    def today = timeToday(null, location.timeZone)
+    def tomorrow = today + 1
+	def month = tomorrow.month+1
+	def day = tomorrow.date
+    
+    def startMonth = settings["schedule${scheduleId}StartMonth"]
+    def startDay = settings["schedule${scheduleId}StartDay"]
+    def stopMonth = settings["schedule${scheduleId}StopMonth"]
+    def stopDay = settings["schedule${scheduleId}StopDay"]
+
+    def sMonth = monthsMap[startMonth]
+    def sDay = startDay.toInteger()
+    def eMonth = monthsMap[stopMonth]
+    def eDay = stopDay.toInteger()
+
+    if (sMonth != null && sDay != null && eMonth != null && eDay != null) {
+        if ((sMonth < eMonth) || (sMonth == eMonth && sDay < eDay)) {
+            // start day occurs before end day (schedule stays within a single year)
+            if ((month == sMonth && day >= sDay) || month > sMonth)  {
+                if ((month == eMonth && day <= eDay) || month < eMonth) {
+                    withinDates = true
+                }
+            }
+        }
+        else if ((sMonth > eMonth) || (sMonth == eMonth && sDay > eDay)) {
+            // start day occurs after end day (schedule wraps around to new year)
+            if ((month == sMonth && day >= sDay) || month > sMonth) {
+                withinDates = true
+            }
+            else if ((month == eMonth && day <= eDay) || month < eMonth)  {
+                withinDates = true
+            }
+        }
+        else if (sMonth == eMonth && sDay == eDay) logDebug("Start day and End day of schedule the same. Invalid schedule.", "Warning")
+    }
+    else logDebug("schedule dates have null value. Aborting schedule check.", "Warning")
+        
+    return withinDates
+}
+
 def isScheduledDayofWeek(scheduleId) {
     def answer = false    
     def today = (new Date()).format('EEEE') 
@@ -1115,25 +1381,34 @@ def isScheduledDayofWeek(scheduleId) {
     return answer
 }
 
+def isTomorrowScheduledDayofWeek(scheduleId) {
+    def answer = false    
+    def today = new Date()
+    def tomorrow = (today + 1).format('EEEE') 
+    def shortTomorrow = daysOfWeekShortMap[tomorrow]
+    if(settings["schedule${scheduleId}DaysOfWeek"] && (settings["schedule${scheduleId}DaysOfWeek"].contains(tomorrow) || settings["schedule${scheduleId}DaysOfWeek"].contains(shortTomorrow))) answer = true 
+    return answer
+}
+
 def getDayOfWeek(Date date) {
     Calendar cal = Calendar.getInstance()
     cal.setTimeZone(location.timeZone)
     cal.setTime(date)
     def dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)    
-    logDebug("Converted ${date} to day of week = ${dayOfWeek}")
     return dayOfWeek
 }
 
 // DYNAMIC TRIGGERS
 def handleTriggerOnEvent(evt) {
     logDebug("handleTriggerTriggered() ${evt.device?.label} (${evt.device?.id}) ${evt.name}: ${evt.value}", "Trace")
-        if (isRecirculatorOff() || (isRecirculatorOn() && settings["maxDurationExtendable"] == true)) {
-            // trigger on with device either if recirculator is off or if recirculator is on but the on duration period should be extended by this device trigger|
-            logDebug("${evt.device?.label} (${evt.device?.id}) triggered on period. Cancelled any pending delayed turn off of recirculator.", "Debug")
-            unschedule("delayedOffHandler")
-            triggerOn()
-        }
-        else logDebug("${evt.device?.label} triggered on period but recirculator is already on and maximum duration of the on period is not configured in app settings to extend the maximum on period duration", "Debug")
+    if (isRecirculatorOff() || (isRecirculatorOn() && settings["maxDurationExtendable"] == true)) {
+        // trigger on with device either if recirculator is off or if recirculator is on but the on duration period should be extended by this device trigger|
+        logDebug("${evt.device?.label} (${evt.device?.id}) triggered on period. Cancelled any pending delayed turn off of recirculator.", "Debug")
+        unschedule("delayedOffHandler")
+        state.pendingDelayedOffTriggers = []
+        triggerOn()
+    }
+    else logDebug("${evt.device?.label} triggered on period but recirculator is already on and maximum duration of the on period is not configured in app settings to extend the maximum on period duration", "Debug")
 }
 
 def handleMotionOff(evt) {
@@ -1160,6 +1435,32 @@ def handleOnSwitchOff(evt) {
     handleTriggerOffEvent(evt, settings["turnOffWithSwitchesDelay"] ?: 0)
 }
 
+def handleCustomDevices1(evt) {
+    if (evt.value == customDevice1AttributeValue) {
+        state.customDevice1Triggered = true
+        handleTriggerOnEvent(evt)
+    }
+    else if (evt.value != customDevice1AttributeValue) {
+        if (state.customDevice1Triggered && turnOffWithCustomDevice1) {
+            handleTriggerOffEvent(evt, settings["turnOffWithCustomDevice1Delay"] ?: 0)
+        }
+        state.customDevice1Triggered = false
+    }
+}
+
+def handleCustomDevices2(evt) {
+    if (evt.value == customDevice2AttributeValue) {
+        state.customDevice2Triggered = true
+        handleTriggerOnEvent(evt)
+    }
+    else if (evt.value != customDevice2AttributeValue) {
+        if (state.customDevice2Triggered && turnOffWithCustomDevice2) {
+            handleTriggerOffEvent(evt, settings["turnOffWithCustomDevice2Delay"] ?: 0)
+        }
+        state.customDevice2Triggered = false
+    }
+}
+
 def handleAccelerationOff(evt) {
     handleTriggerOffEvent(evt, settings["turnOffWhenStopsMovingDelay"] ?: 0)
 }
@@ -1172,8 +1473,10 @@ def handleTriggerOffEvent(evt, turnOffDelay) {
     logDebug("handleTriggerOffEvent() ${evt.device?.label} (${evt.device?.id}) ${evt.name}: ${evt.value}", "Trace")
         if (isRecirculatorOn()) {
             if (turnOffDelay > 0) {
-                runIn(turnOffDelay * 60, "delayedOffHandler", [overwrite: false, data: [device: "${evt.device?.label}"]])
-                logDebug("${evt.device?.label} (${evt.device?.id}) triggered off period after delay. Scheduled recirculator to turn off in " + turnOffDelay + " minutes.", "Debug")
+                runIn(turnOffDelay * 60, "delayedOffHandler", [overwrite: false, data: [deviceLabel: "${evt.device?.label}", deviceId: evt.device?.id]])
+                if (state.pendingDelayedOffTriggers == null) state.pendingDelayedOffTriggers = []
+                if (state.pendingDelayedOffTriggers.indexOf(evt.device?.id) == -1) state.pendingDelayedOffTriggers.add(evt.device?.id)
+                logDebug("${evt.device?.label} (${evt.device?.id}) triggered off period after delay. Scheduled recirculator to turn off in " + turnOffDelay + " minutes. state.pendingDelayedOffTriggers = " + state.pendingDelayedOffTriggers, "Debug")
             }
             else {
                 logDebug("${evt.device?.label} (${evt.device?.id}) triggered off period. Calling triggerOff()", "Debug")
@@ -1184,8 +1487,13 @@ def handleTriggerOffEvent(evt, turnOffDelay) {
 }
 
 def delayedOffHandler(data) {
-    logDebug("Executing delayeOffHandler() triggered by ${data.device}...", "Trace")
-    triggerOff()
+    logDebug("Executing delayeOffHandler() triggered by ${data.deviceLabel}...", "Trace")
+    if (state.pendingDelayedOffTriggers != null && state.pendingDelayedOffTriggers.indexOf(data.deviceId) != -1) {
+        state.pendingDelayedOffTriggers.removeElement(data.deviceId)
+        logDebug("Removed ${data.deviceId} from state.pendingDelayedOffTriggers", "Debug")
+    }
+    if (state.pendingDelayedOffTriggers == null || (state.pendingDelayedOffTriggers != null && state.pendingDelayedOffTriggers.size() == 0)) triggerOff() // only turn off if no pending trigger off events still
+    else logDebug("delayeOffHandler() triggered by ${data.deviceLabel} but there are other delayed trigger off events still pending. Waiting to turn off. state.pendingDelayedOffTriggers = " + state.pendingDelayedOffTriggers + " with size = " + state.pendingDelayedOffTriggers.size(), "Debug")
 }
 
 def triggerOn() {   
@@ -1214,10 +1522,15 @@ def handleTriggerOnMaxDurationReached() {
 
 def triggerOff(maxDurationReached = false) {
     logDebug("Executing triggerOff()...", "Trace")
-    if (maxDurationReached || areAllTriggersOff()) {
+    if (maxDurationReached) {
         turnRecirculatorOff()
+        logDebug("Triggerd off based on max duration being reached, even if some triggers are still on.", "Debug")
     }
-    else logDebug("Triggerd off, but either max duration is not reached or all triggers are not off. Keeping on.", "Debug")
+    else if (areAllTriggersOff()) {
+        turnRecirculatorOff()
+        logDebug("Triggerd off based on all triggers being off.", "Debug")
+    }
+    else logDebug("Triggerd off, but not all triggers are off and max on-duration has not yet been reached. Keeping on.", "Debug")
 }
 
 def areAllTriggersOff() {
@@ -1272,6 +1585,7 @@ def triggerTempHandler(evt) {
 }
 
 def updateFromTriggerState() {
+    logDebug("Updating based on trigger state.", "Debug")
     if (isRecirculatorOff() && !areAllTriggersOff() && doesModeAllowRecirculatorOn() && doSchedulesAllowRecirculatorState("on")) {
         // check current state of trigger devices and turn recirculator on if state of trigger devices indicates it should be on and mode allows it to be on
         triggerOn()
