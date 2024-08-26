@@ -18,6 +18,7 @@
  *
  * Change Log
  * -----------
+<<<<<<< HEAD
  * v0.3.1 - bug fixes
  * v0.3.0 - substantial recode to allow prioritizing any selected trigger over select mode(s) and/or schedule(s)
  * v0.2.6 - reverted to stateless recirc on/off control while maintaining water temp substate
@@ -30,6 +31,19 @@
  * v0.1.2 - bug fix with schedules
  * v0.1.1 - update momentary relay settings and make delay configurable
  * v0.1.0 - Beta release
+=======
+ * v.0.3.0 - substantial recode to allow prioritizing any selected trigger over select mode(s) and/or schedule(s)
+ * v.0.2.6 - reverted to stateless recirc on/off control while maintaining water temp substate
+ * v.0.2.5 - added ability to prioritize a schedule over select mode(s)
+ * v.0.2.4 - fix shorter delayed off from triggering off when still have longer delayed off pending
+ * v.0.2.3 - bug fixes
+ * v.0.2.2 - make sensed state switch optional
+ * v.0.2.1 - bug fixes; early version of water temp sensor handling
+ * v.0.2.0 - bug fixes with modes and schedules; optimized to unsubscribe from trigger events if mode or schedule active; added support for schedules that wrap around to new year
+ * v.0.1.2 - bug fix with schedules
+ * v.0.1.1 - update momentary relay settings and make delay configurable
+ * v.0.1.0 - Beta release
+>>>>>>> c7864cab24c0a9061fe74fbd7f33e22a9dae563c
  *
  */
 
@@ -190,7 +204,11 @@ def setupApp() {
                 def enumOptions = getEnumOptions(settings["customDevices2"])
                 input name: "customDevice2Attribute", type: "enum", title: "Select attribute...", options: enumOptions, multiple: false, required: true, submitOnChange: true, width: 6
                 input name: "customDevice2AttributeValue", type: "string", title: "On when attribute value change to:", multiple: false, required: true, submitOnChange: true, width: 6
+<<<<<<< HEAD
                 input name:"customDevices2OverModes", type: "enum", title: "Trigger on even in these OFF Modes...", options: offModes, multiple: true, required: false, width: 6
+=======
+                input name:"customDevices2OverModes", type: "enum", title: "Trigger on even in these OFF Modes...", options: offModes,multiple: true, required: false, width: 6
+>>>>>>> c7864cab24c0a9061fe74fbd7f33e22a9dae563c
                 input name:"customDevices2OverSchedules", type: "enum", title: "Trigger on even if scheduled to be off by these schedules...", options: getSchedulesEnumMap(), multiple: true, required: false, width: 6
                 input name: "turnOffWithCustomDevice2", type: "bool", title: "Off when the specified attribute of all of the devices changes away from the specific value?", defaultValue: false, submitOnChange: true, width: 6
                 if (turnOffWithCustomDevice2) input name: "turnOffWithCustomDevice2Delay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 6
@@ -284,9 +302,13 @@ def schedulePage() {
                     input(name:"schedule${j}StopMonth", type:"enum", options:months, title: "Stop Month", required: true, width: 2)
                     input(name:"schedule${j}StopDay", type:"enum", options:getNumDaysInMonth(settings["schedule{j}StopMonth"]), title: "Stop Day", required: true, width: 2)
                     input name:"schedule${j}DaysOfWeek", type: "enum", title: "Schedule Days of Week", options: daysOfWeekList, multiple: true, required: true, width: 4
+<<<<<<< HEAD
 
                     def modeOptions = getModeOptions()
                     if (modeOptions.size() > 0) input name:"schedule${j}DeprioritizedModes", type: "enum", title: "Prioritize schedule over these Hubitat modes that are defined as ON or OFF modes...", options: modeOptions, multiple: true, required: false, width: 12
+=======
+                    input name:"schedule${j}DeprioritizedModes", type: "mode", title: "Prioritize Schedule Over These Modes...", options: location?.getModes(), multiple: true, required: false, width: 12
+>>>>>>> c7864cab24c0a9061fe74fbd7f33e22a9dae563c
                     
                     displayPeriodTable(j)
                     
@@ -568,9 +590,13 @@ def initialize() {
     state.maxDurationHandlingScheduled = false
     state.manualOn = false
     state.manualOff = false
+<<<<<<< HEAD
 
     update(true)
     schedule("0 1 0 ? * *", update) // at beginning of each day, update recirculator state to handle potential issues with the start of the day
+=======
+    update(true)
+>>>>>>> c7864cab24c0a9061fe74fbd7f33e22a9dae563c
 
     initializeDebugLogging()
 }
@@ -790,7 +816,11 @@ def scheduleSchedules(onlyTomorrow = true, onlyToday = false) {
                     def startHour = start.format("H")
                     def startMin = start.format("m")
                     def startChron = "0 ${startMin} ${startHour} ? * ${daysOfWeekChron}"
+<<<<<<< HEAD
                     schedule(startChron, handlePeriodStart, [data: [scheduleId: j, periodId: index], overwrite: false])
+=======
+                    runOnce(startChron, handlePeriodStart, [data: [scheduleId: j, periodId: index], overwrite: false])
+>>>>>>> c7864cab24c0a9061fe74fbd7f33e22a9dae563c
                     logDebug("Scheduled start of period ${index} for schedule " +  settings["schedule${j}Name"] + " with chron string " + startChron, "Debug")
                 }
             
@@ -1398,6 +1428,7 @@ Boolean inOffMode() {
     return answer    
 }
 
+<<<<<<< HEAD
 def getModeOptions() {
     def modeOptions = []
     if (settings["onModes"]) modeOptions += settings["onModes"]
@@ -1405,6 +1436,8 @@ def getModeOptions() {
     return modeOptions
 }
 
+=======
+>>>>>>> c7864cab24c0a9061fe74fbd7f33e22a9dae563c
 // SCHEDULES
 def handlePeriodStart(data) {
     
