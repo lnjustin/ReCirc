@@ -204,11 +204,7 @@ def setupApp() {
                 def enumOptions = getEnumOptions(settings["customDevices2"])
                 input name: "customDevice2Attribute", type: "enum", title: "Select attribute...", options: enumOptions, multiple: false, required: true, submitOnChange: true, width: 6
                 input name: "customDevice2AttributeValue", type: "string", title: "On when attribute value change to:", multiple: false, required: true, submitOnChange: true, width: 6
-<<<<<<< HEAD
                 input name:"customDevices2OverModes", type: "enum", title: "Trigger on even in these OFF Modes...", options: offModes, multiple: true, required: false, width: 6
-=======
-                input name:"customDevices2OverModes", type: "enum", title: "Trigger on even in these OFF Modes...", options: offModes,multiple: true, required: false, width: 6
->>>>>>> c7864cab24c0a9061fe74fbd7f33e22a9dae563c
                 input name:"customDevices2OverSchedules", type: "enum", title: "Trigger on even if scheduled to be off by these schedules...", options: getSchedulesEnumMap(), multiple: true, required: false, width: 6
                 input name: "turnOffWithCustomDevice2", type: "bool", title: "Off when the specified attribute of all of the devices changes away from the specific value?", defaultValue: false, submitOnChange: true, width: 6
                 if (turnOffWithCustomDevice2) input name: "turnOffWithCustomDevice2Delay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 6
@@ -590,13 +586,9 @@ def initialize() {
     state.maxDurationHandlingScheduled = false
     state.manualOn = false
     state.manualOff = false
-<<<<<<< HEAD
 
     update(true)
     schedule("0 1 0 ? * *", update) // at beginning of each day, update recirculator state to handle potential issues with the start of the day
-=======
-    update(true)
->>>>>>> c7864cab24c0a9061fe74fbd7f33e22a9dae563c
 
     initializeDebugLogging()
 }
@@ -816,6 +808,7 @@ def scheduleSchedules(onlyTomorrow = true, onlyToday = false) {
                     def startHour = start.format("H")
                     def startMin = start.format("m")
                     def startChron = "0 ${startMin} ${startHour} ? * ${daysOfWeekChron}"
+                    schedule(startChron, handlePeriodStart, [data: [scheduleId: j, periodId: index], overwrite: false])
 <<<<<<< HEAD
                     schedule(startChron, handlePeriodStart, [data: [scheduleId: j, periodId: index], overwrite: false])
 =======
@@ -1426,6 +1419,13 @@ Boolean inOffMode() {
     def answer = false
     if (settings["offModes"] && location?.getMode() in settings["offModes"]) answer = true
     return answer    
+}
+
+def getModeOptions() {
+    def modeOptions = []
+    if (settings["onModes"]) modeOptions += settings["onModes"]
+    if (settings["offModes"]) modeOptions += settings["offModes"]
+    return modeOptions
 }
 
 <<<<<<< HEAD
