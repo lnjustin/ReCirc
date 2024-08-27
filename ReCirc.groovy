@@ -18,6 +18,7 @@
  *
  * Change Log
  * -----------
+ * v.0.3.2 - added option to override any native max ON duration
  * v.0.3.1 - bug fixes
  * v.0.3.0 - substantial recode to allow prioritizing any selected trigger over select mode(s) and/or schedule(s)
  * v.0.2.6 - reverted to stateless recirc on/off control while maintaining water temp substate
@@ -246,6 +247,17 @@ def setupApp() {
                 input name: "waterTempSensor2", type: "capability.temperatureMeasurement", title: "Water Temperature Sensor 2", multiple: false, required: true
                 input name: "turnOnDiffTemp", type: "number", title: "Turn On When Temp Difference Reaches", defaultValue: 20, required: true
                 input name: "turnOffDiffTemp", type: "number", title: "Turn Off When Temp Difference Falls To", defaultValue: 0, required: true
+            }
+        }
+
+        if (recircSensedState) {
+            section() {
+                paragraph getInterface("header", " Native Max ON Duration Handling")
+                paragraph getInterface("note", "Some recirculation systems natively limit the maximum duration of an on period. Use these settings to effectively override the native maximum ON duration, by detecting when the recirculation system has been ON for the native maximum duraiton and then turning the recirculator right back on.")
+                input name: "overrideNativeMax", type: "bool", title: "Override Native Max ON Duration?", defaultValue: false, required: true, width: 4, submitOnChange: true
+                if (overrideNativeMax) {
+                    input name: "nativeMaxOnDuration", type: "number", title: "Native Maximum ON Duration (minutes)", required: true, defaultValue: 120, multiple: false, width: 6
+                }
             }
         }
 
@@ -572,6 +584,8 @@ def initialize() {
     update(true)
     schedule("0 1 0 ? * *", update) // at beginning of each day, update recirculator state to handle potential issues with the start of the day
 
+    if (overrideNativeMax) subscribe(recircSensedState, "switch", recircSensedStateHandler)
+
     initializeDebugLogging()
 }
 
@@ -827,6 +841,7 @@ def makeRelayMomentary() {
 def waterTempHandler(evt) {
     def substate = getRecirculatorSubState()
     if (substate == "on" && !isRecirculatorOn()) {
+        state.lastOnTime = (new Date()).getTime()
         if (settings["simulationEnable"]) simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On Cycle Until Come Up To Temp")
         else {
             recircRelay.on()
@@ -835,6 +850,7 @@ def waterTempHandler(evt) {
         }
     }
     else if (substate == "off" && !isRecirculatorOff()) {
+        state.lastOffTime = (new Date()).getTime()
         if (settings["simulationEnable"]) simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off Cycle While Up To Temp")
         else {
             recircRelay.on()
@@ -888,6 +904,7 @@ def turnRecirculatorOn() {
             substate = getRecirculatorSubState()
         }
         if (substate == null || substate == "on") {
+            state.lastOnTime = (new Date()).getTime()
             if (settings["simulationEnable"]) {
                 simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On" + substate == "on" ? " Until Come Up To Temp." : "")
             }
@@ -908,6 +925,7 @@ def turnRecirculatorOn() {
 def turnRecirculatorOff() {
     if (!isRecirculatorOff()) {
         state.onPeriodLastEndedAt = (new Date()).getTime()
+        state.lastOffTime = (new Date()).getTime()
         logDebug("Set recirculator State to off and unscheduled all delayedOffHandlers.", "Debug")
         if (settings["simulationEnable"]) {
             simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off")
@@ -920,6 +938,21 @@ def turnRecirculatorOff() {
         unsubscribeWaterTempSensors()
     } else {
         logDebug("Recirculator called to turn off, but it is already off. Nothing to do.", "Debug")
+    }
+}
+
+def recircSensedStateHandler(evt) {
+    logDebug("Handling Sensed Recirculator State: ${evt.value}", "Trace")
+    if (overrideNativeMax && evt.value == "off" && state.lastOffTime && state.lastOnTime) {
+        def secsSinceOff = howManySecsPastSince(state.lastOffTime) // seconds since this app last turned off recirculator
+        if (secsSinceOff > 15) { // assume this app was NOT what triggered the recirculator to turn off just now if it has been more than 15 seconds since the app last commanded the recirculator to turn off. 
+            logDebug("Recirculator turned off, but it has been more than 15 seconds since this app commanded the recirculator to turn off. Checking for native max ON duration expiration.", "Debug")
+            def secsSinceOn = howManySecsPastSince(state.lastOnTime) // seconds since this app last turned on recirculator
+            if (secsSinceOn >= nativeMaxOnDuration*60 - 30 && secsSinceOn <= nativeMaxOnDuration*60 + 30) { // assume recirculator turned itself off if (1) this app did not turn the recirculator off; and (2) the recirculator turned off at a time that corresponds with the user input
+                logDebug("Recirculator turned ON about ${nativeMaxOnDuration} minutes ago, suggesting that the recirculator's native max ON duration was reached and triggered the recirculator to turn off. Updating recirculator state in case recirculator should turn back on", "Debug")
+                update()
+            }
+        }
     }
 }
 
