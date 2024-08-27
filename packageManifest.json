@@ -1,7 +1,7 @@
 {
   "packageName": "ReCirc",
   "author": "lnustin",
-  "version": "0.3.2",
+  "version": "1.0.0",
   "minimumHEVersion": "2.1.9",
   "dateReleased": "2024-08-27",
   "apps": [

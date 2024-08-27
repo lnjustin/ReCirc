@@ -18,6 +18,7 @@
  *
  * Change Log
  * -----------
+ * v.1.0.0 - initial release
  * v.0.3.2 - added option to override any native max ON duration
  * v.0.3.1 - bug fixes
  * v.0.3.0 - substantial recode to allow prioritizing any selected trigger over select mode(s) and/or schedule(s)
