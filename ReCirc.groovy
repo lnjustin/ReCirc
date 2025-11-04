@@ -22,7 +22,7 @@
  * v.0.3.2 - added option to override any native max ON duration
  * v.0.3.1 - bug fixes
  * v.0.3.0 - substantial recode to allow prioritizing any selected trigger over select mode(s) and/or schedule(s)
- * v.0.2.6 - reverted to stateless recirc on/off control while maintaining water temp substate
+ * v.0.2.6 - reverted to stateless recirc on/off control while maintaining water temp subState
  * v.0.2.5 - added ability to prioritize a schedule over select mode(s)
  * v.0.2.4 - fix shorter delayed off from triggering off when still have longer delayed off pending
  * v.0.2.3 - bug fixes
@@ -133,7 +133,7 @@ def setupApp() {
                 input name:"arrivePresenceOverModes", type: "enum", title: "Trigger on even in these OFF Modes...", options: offModes,multiple: true, required: false, width: 6
                 input name:"arrivePresenceOverSchedules", type: "enum", title: "Trigger on even if scheduled to be off by these schedules...", options: getSchedulesEnumMap(), multiple: true, required: false, width: 6
                 input name: "turnOffWhenAllNotPresent", type: "bool", title: "Off when all presence sensors are not present?", defaultValue: false, submitOnChange: true, width: 6
-                if (turnOffWhenPresenceDeparts) input name: "turnOffWhenAllNotPresentDelay", type: "number", title: "After how long of a delay, if any  (minutes)?", required: true, defaultValue: 0, multiple: false, width: 6
+                if (turnOffWhenAllNotPresent) input name: "turnOffWhenAllNotPresentDelay", type: "number", title: "After how long of a delay, if any  (minutes)?", required: true, defaultValue: 0, multiple: false, width: 6
             }
 
             paragraph ""
@@ -142,7 +142,7 @@ def setupApp() {
                 input name:"departPresenceOverModes", type: "enum", title: "Trigger on even in these OFF Modes...", options: offModes,multiple: true, required: false, width: 6
                 input name:"departPresenceOverSchedules", type: "enum", title: "Trigger on even if scheduled to be off by these schedules...", options: getSchedulesEnumMap(), multiple: true, required: false, width: 6
                 input name: "turnOffWhenAllPresent", type: "bool", title: "Off when all presence sensors are present?", defaultValue: false, submitOnChange: true, width: 6
-                if (turnOffWhenPresenceDeparts) input name: "turnOffWhenAllPresentDelay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 6
+                if (turnOffWhenAllPresent) input name: "turnOffWhenAllPresentDelay", type: "number", title: "After how long of a delay, if any (minutes)?", required: true, defaultValue: 0, multiple: false, width: 6
             }
 
 			paragraph ""
@@ -293,9 +293,9 @@ def schedulePage() {
                     input name: "schedule${j}Name", type: "text", title: "Schedule Name", required: true, width: 12, submitOnChange: true                    
 
                     input(name:"schedule${j}StartMonth", type:"enum", options:months, title: "Start Month", required: true, width: 2)
-                    input(name:"schedule${j}StartDay", type:"enum", options:getNumDaysInMonth(settings["schedule{j}StartMonth"]), title: "Start Day", required: true, width: 2)                            
+                    input(name:"schedule${j}StartDay", type:"enum", options:getNumDaysInMonth(settings["schedule${j}StartMonth"]), title: "Start Day", required: true, width: 2)                            
                     input(name:"schedule${j}StopMonth", type:"enum", options:months, title: "Stop Month", required: true, width: 2)
-                    input(name:"schedule${j}StopDay", type:"enum", options:getNumDaysInMonth(settings["schedule{j}StopMonth"]), title: "Stop Day", required: true, width: 2)
+                    input(name:"schedule${j}StopDay", type:"enum", options:getNumDaysInMonth(settings["schedule${j}StopMonth"]), title: "Stop Day", required: true, width: 2)
                     input name:"schedule${j}DaysOfWeek", type: "enum", title: "Schedule Days of Week", options: daysOfWeekList, multiple: true, required: true, width: 4
 
                     def modeOptions = getModeOptions()
@@ -657,7 +657,7 @@ def updateTriggerSubscriptionsAndDelayedEvents(triggers = triggerTypes) {
     if (openContactSensors) {
         if ("OpenSensor" in triggers) { 
             subscribe(openContactSensors, "contact.open", handleTriggerOnEvent)
-            if (turnOffWhenReclose) subscribe(openContactSensors, "contact.closed", handleOpenContacteOff)
+            if (turnOffWhenReclose) subscribe(openContactSensors, "contact.closed", handleOpenContactOff)
         }
         else {
             unsubscribe(openContactSensors, "contact.open")
@@ -789,7 +789,7 @@ def scheduleSchedules(onlyTomorrow = true, onlyToday = false) {
             state.scheduleMap[(j)].eachWithIndex { item, index ->
                 def start = toDateTime(item?.start)
                 if (onlyToday) {
-                    def startToday = getTodayAtSameTime(start) // schedule tomorrow, rather than today, so that accounts for possibility of schedule starting at midnight
+                    def startToday = getTodayAtSameTime(start)
                     if (startToday.after(now)) {
                         runOnce(startToday, handlePeriodStart, [data: [scheduleId: j, periodId: index], overwrite: false])
                         logDebug("Scheduled start of period ${index} for schedule " +  settings["schedule${j}Name"] + " for " + startToday, "Debug")
@@ -840,8 +840,8 @@ def makeRelayMomentary() {
 }
 
 def waterTempHandler(evt) {
-    def substate = getRecirculatorSubState()
-    if (substate == "on" && !isRecirculatorOn()) {
+    def subState = getRecirculatorSubState()
+    if (subState == "on" && !isRecirculatorOn()) {
         state.lastOnTime = (new Date()).getTime()
         if (settings["simulationEnable"]) simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On Cycle Until Come Up To Temp")
         else {
@@ -850,12 +850,15 @@ def waterTempHandler(evt) {
             notificationDevices?.deviceNotification("Recirculator On Cycle Until Come Up To Temp")
         }
     }
-    else if (substate == "off" && !isRecirculatorOff()) {
+    else if (subState == "off" && !isRecirculatorOff()) {
         state.lastOffTime = (new Date()).getTime()
         if (settings["simulationEnable"]) simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off Cycle While Up To Temp")
         else {
-            recircRelay.on()
-            if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+            if (recircRelayMomentary && momentaryDelay) {
+                recircRelay.on()
+                runIn(momentaryDelay, makeRelayMomentary)
+            }
+            else recircRelay.off()
             notificationDevices?.deviceNotification("Recirculator Off Cycle While Up To Temp")
         }
     }
@@ -894,28 +897,28 @@ def getRecirculatorSubState() {
         }        
     }
     else subState = null
-    return substate
+    return subState
 }
 
 def turnRecirculatorOn() {
     if (!isRecirculatorOn()) {
-        def substate = null
+        def subState = null
         if (waterTempControlType != null) {
             state.coolDownWaterTemp = null
-            substate = getRecirculatorSubState()
+            subState = getRecirculatorSubState()
         }
-        if (substate == null || substate == "on") {
+        if (subState == null || subState == "on") {
             state.lastOnTime = (new Date()).getTime()
             if (settings["simulationEnable"]) {
-                simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On" + substate == "on" ? " Until Come Up To Temp." : "")
+                simulateNotificationDevices?.deviceNotification("Simulation: Recirculator On" + (subState == "on" ? " Until Come Up To Temp." : ""))
             }
             else {
                 recircRelay.on()
                 if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
-                notificationDevices?.deviceNotification("Recirculator On" + substate == "on" ? " Until Come Up To Temp." : "")
+                notificationDevices?.deviceNotification("Recirculator On" + (subState == "on" ? " Until Come Up To Temp." : ""))
             }
         }
-        else if (substate == "off") logDebug("Recirculator called to turn on, but already up to temp. Will turn on when needed to reach temp.", "Debug")
+        else if (subState == "off") logDebug("Recirculator called to turn on, but already up to temp. Will turn on when needed to reach temp.", "Debug")
         subscribeWaterTempSensors()
     }
     else {
@@ -932,8 +935,11 @@ def turnRecirculatorOff() {
             simulateNotificationDevices?.deviceNotification("Simulation: Recirculator Off")
         }
         else {
-            recircRelay.on()
-            if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
+            if (recircRelayMomentary && momentaryDelay != null) {
+                recircRelay.on()
+                runIn(momentaryDelay, makeRelayMomentary)
+            }
+            else recircRelay.off()
             notificationDevices?.deviceNotification("Recirculator Off")
         }
         unsubscribeWaterTempSensors()
@@ -1058,47 +1064,47 @@ def anyTriggersActive(triggers = triggerTypes, exceptedFromLimits = false) {
     }
     
     if ("ArriveSensor" in triggers && (!exceptedFromLimits || (exceptedFromLimits && "ArriveSensor" in triggerLimitsExceptions))) {
-        list = arrivePresenceSensors?.findAll { it?.latestValue("presence") == "present" }
+        def list = arrivePresenceSensors?.findAll { it?.latestValue("presence") == "present" }
         if (list && list.size() > 0) activeTriggers += list
     }
 
     if ("DepartSensor" in triggers && (!exceptedFromLimits || (exceptedFromLimits && "DepartSensor" in triggerLimitsExceptions))) {
-        list = departPresenceSensors?.findAll { it?.latestValue("presence") == "not present" }
+        def list = departPresenceSensors?.findAll { it?.latestValue("presence") == "not present" }
         if (list && list.size() > 0) activeTriggers += list
     }
 
     if ("OpenSensor" in triggers && (!exceptedFromLimits || (exceptedFromLimits && "OpenSensor" in triggerLimitsExceptions))) {
-        list = openContactSensors?.findAll { it?.latestValue("contact") == "open" }
+        def list = openContactSensors?.findAll { it?.latestValue("contact") == "open" }
         if (list && list.size() > 0) activeTriggers += list
     }
     
     if ("CloseSensor" in triggers && (!exceptedFromLimits || (exceptedFromLimits && "CloseSensor" in triggerLimitsExceptions))) {
-        list = closeContactSensors?.findAll { it?.latestValue("contact") == "closed" }
+        def list = closeContactSensors?.findAll { it?.latestValue("contact") == "closed" }
         if (list && list.size() > 0) activeTriggers += list
     }
     
     if ("Switch" in triggers && (!exceptedFromLimits || (exceptedFromLimits && "Switch" in triggerLimitsExceptions))) {
-        list = onSwitches?.findAll { it?.latestValue("switch") == "on" }
+        def list = onSwitches?.findAll { it?.latestValue("switch") == "on" }
         if (list && list.size() > 0) activeTriggers += list
     }
 
     if ("CustomDevice1" in triggers && (!exceptedFromLimits || (exceptedFromLimits && "CustomDevice1" in triggerLimitsExceptions))) {
-        list = customDevices1?.findAll { it?.latestValue(customDevice1Attribute) == customDevice1AttributeValue }
+        def list = customDevices1?.findAll { it?.latestValue(customDevice1Attribute) == customDevice1AttributeValue }
         if (list && list.size() > 0) activeTriggers += list
     }
 
     if ("CustomDevice2" in triggers && (!exceptedFromLimits || (exceptedFromLimits && "CustomDevice2" in triggerLimitsExceptions))) {
-        list = customDevices2?.findAll { it?.latestValue(customDevice2Attribute) == customDevice2AttributeValue }
+        def list = customDevices2?.findAll { it?.latestValue(customDevice2Attribute) == customDevice2AttributeValue }
         if (list && list.size() > 0) activeTriggers += list
     }
 
     if ("TempSensor" in triggers && (!exceptedFromLimits || (exceptedFromLimits && "TempSensor" in triggerLimitsExceptions))) {
-        list = tempTriggerSensors?.findAll { it?.latestValue("temperature") < onWhenBelowTemp }
+        def list = tempTriggerSensors?.findAll { it?.latestValue("temperature") < onWhenBelowTemp }
         if (list && list.size() > 0) activeTriggers += list
     }
 
     if ("MoveSensor" in triggers && (!exceptedFromLimits || (exceptedFromLimits && "MoveSensor" in triggerLimitsExceptions))) {
-        list = accelerationSensors?.findAll { it?.latestValue("acceleration") == "active" }
+        def list = accelerationSensors?.findAll { it?.latestValue("acceleration") == "active" }
         if (list && list.size() > 0) activeTriggers += list
     }
 
@@ -1470,6 +1476,13 @@ def isTimeOfDayWithinPeriod(scheduleId, periodId) {
     return answer
 }
 
+def isBetweenTimeOfDay(starting, ending) {
+    def currTime = now()
+    def start = timeToday(starting, location.timeZone).time
+    def stop = timeToday(ending, location.timeZone).time
+    return start < stop ? currTime >= start && currTime <= stop : currTime <= stop || currTime >= start
+}
+
 Boolean isSchedulePrioritizedOverCurrentMode(scheduleId) {
     def answer = false
     if (settings["schedule${scheduleId}DeprioritizedModes"] && location?.getMode() in settings["schedule${scheduleId}DeprioritizedModes"]) answer = true
@@ -1653,7 +1666,7 @@ def handleDepartPresenceOff(evt) {
     handleTriggerOffEvent(evt, settings["turnOffWhenAllPresentDelay"] ?: 0, "DepartSensor")
 }
 
-def handleOpenContacteOff(evt) {
+def handleOpenContactOff(evt) {
     handleTriggerOffEvent(evt, settings["turnOffWhenRecloseDelay"] ?: 0, "OpenSensor")
 }
 
