@@ -916,7 +916,7 @@ def turnRecirculatorOn() {
             else {
                 recircRelay.on()
                 if (recircRelayMomentary && momentaryDelay) runIn(momentaryDelay, makeRelayMomentary)
-                notificationDevices?.deviceNotification("Recirculator On" + (subState == "on" ? " Until Come Up To Temp." : ""))
+                runIn(4, "verifyRecirculatorOn", [overwrite: true])
             }
         }
         else if (subState == "off") logDebug("Recirculator called to turn on, but already up to temp. Will turn on when needed to reach temp.", "Debug")
@@ -924,6 +924,15 @@ def turnRecirculatorOn() {
     }
     else {
         logDebug("Recirculator called to turn on, but it is already on. Nothing to do.", "Debug")
+    }
+}
+
+def verifyRecirculatorOn() {
+    if (isRecirculatorOn()) {
+        notificationDevices?.deviceNotification("Recirculator On")
+    } else {
+        notificationDevices?.deviceNotification("Recirculator commanded ON, but not sensed as ON. Check device or wiring.")
+        log.warn "Recirculator commanded ON, but state still OFF after verification delay."
     }
 }
 
@@ -941,11 +950,20 @@ def turnRecirculatorOff() {
                 runIn(momentaryDelay, makeRelayMomentary)
             }
             else recircRelay.off()
-            notificationDevices?.deviceNotification("Recirculator Off")
+            runIn(4, "verifyRecirculatorOff", [overwrite: true])
         }
         unsubscribeWaterTempSensors()
     } else {
         logDebug("Recirculator called to turn off, but it is already off. Nothing to do.", "Debug")
+    }
+}
+
+def verifyRecirculatorOff() {
+    if (isRecirculatorOff()) {
+        notificationDevices?.deviceNotification("Recirculator Off")
+    } else {
+        notificationDevices?.deviceNotification("Recirculator commanded OFF, but not sensed as OFF. Check device or wiring.")
+        log.warn "Recirculator commanded OFF, but state still ON after verification delay."
     }
 }
 
@@ -959,6 +977,9 @@ def recircSensedStateHandler(evt) {
             if (secsSinceOn >= nativeMaxOnDuration*60 - 30 && secsSinceOn <= nativeMaxOnDuration*60 + 30) { // assume recirculator turned itself off if (1) this app did not turn the recirculator off; and (2) the recirculator turned off at a time that corresponds with the user input
                 logDebug("Recirculator turned ON about ${nativeMaxOnDuration} minutes ago, suggesting that the recirculator's native max ON duration was reached and triggered the recirculator to turn off. Updating recirculator state in case recirculator should turn back on", "Debug")
                 update()
+            }
+            else {
+                logDebug("Recirculator turned ON about ${nativeMaxOnDuration} minutes ago, suggesting that the recirculator's native max ON duration was NOT reached. Check for other causes of recirculator turning off.", "Debug")
             }
         }
     }
